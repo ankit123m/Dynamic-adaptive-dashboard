@@ -1,0 +1,1832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>Dynamic Adaptive Analytics Dashboard</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<!-- Chart.js, SheetJS, and PapaParse -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+  :root {
+    --page-bg: #F1F5F9;
+    --card-bg: #FFFFFF;
+    --ink: #1F2937;
+    --text-muted: #6B7280;
+    --line: #E5E7EB;
+    --line-soft: #F3F4F6;
+    --primary: #5865F2;
+    --primary-soft: #EEF2FF;
+    --up: #059669;
+    --up-soft: #ECFDF5;
+    --down: #DC2626;
+    --down-soft: #FEF2F2;
+    --cyan: #0EA5E9;
+    --amber: #F59E0B;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--page-bg);
+    color: var(--ink);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* App Shell */
+  .app-shell { display: flex; min-height: 100vh; position: relative; }
+
+  /* Sidebar (Desktop Persistent / Mobile Drawer) */
+  .sidebar {
+    width: 240px; flex-shrink: 0; background: #FFFFFF; border-right: 1px solid var(--line);
+    padding: 22px 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; z-index: 50;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .sidebar .logo-row { display: flex; align-items: center; gap: 10px; padding: 0 6px; margin-bottom: 24px; }
+  .sidebar .logo-icon {
+    width: 36px; height: 36px; border-radius: 9px;
+    background: linear-gradient(135deg, #5865F2, #0EA5E9);
+    display: flex; align-items: center; justify-content: center; color: white; flex-shrink: 0;
+  }
+  .sidebar .brandname { font-weight: 800; font-size: 15px; color: var(--ink); line-height: 1.1; }
+  .sidebar .brandsub { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+  .sidebar .nav-label { font-size: 10px; color: #9CA3AF; text-transform: uppercase; letter-spacing: .06em; padding: 0 10px; margin: 14px 0 6px; font-weight: 700; }
+  .sidebar nav { display: flex; flex-direction: column; gap: 4px; }
+  .sidebar .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px;
+    font-size: 13.5px; color: var(--text-muted); font-weight: 500; cursor: pointer; transition: all .15s ease;
+    user-select: none;
+  }
+  .sidebar .nav-item:hover:not(.active) { background: #F3F4F6; color: var(--ink); }
+  .sidebar .nav-item.active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+  .sidebar .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* Mobile Backdrop */
+  .sidebar-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(2px); z-index: 40; opacity: 0; transition: opacity 0.25s ease;
+  }
+  .sidebar-backdrop.open { display: block; opacity: 1; }
+
+  /* Main Content Area */
+  .main-col { flex: 1; min-width: 0; padding: 22px 28px 48px; max-width: 1520px; }
+
+  /* Topbar */
+  .topbar { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 20px; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .topbar .crumb { font-size: 12px; color: var(--text-muted); margin-bottom: 2px; }
+  .topbar h1 { font-size: 22px; font-weight: 800; color: var(--ink); line-height: 1.2; }
+  .topbar .right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .topbar .as-of { font-size: 12px; color: var(--text-muted); text-align: right; line-height: 1.4; }
+  .topbar .as-of b { color: var(--ink); font-weight: 600; }
+
+  /* Hamburger Toggle Button */
+  .hamburger-btn {
+    display: none; align-items: center; justify-content: center;
+    width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--line);
+    background: #FFFFFF; color: var(--ink); cursor: pointer; flex-shrink: 0;
+  }
+  .hamburger-btn svg { width: 20px; height: 20px; }
+
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--up);
+    margin-right: 4px; animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
+
+  /* Universal Buttons */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 14px; border-radius: 8px;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: inherit;
+    border: 1px solid transparent; white-space: nowrap; min-height: 38px;
+  }
+  .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .btn-primary:hover { opacity: 0.92; }
+  .btn-outline { background: #FFFFFF; border-color: var(--line); color: var(--ink); }
+  .btn-outline:hover { background: #F9FAFB; }
+  .btn-success { background: #059669; color: #fff; border-color: #059669; }
+  .btn-success:hover { opacity: 0.92; }
+
+  /* Filter Bar */
+  .filter-bar {
+    background: #FFFFFF; border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 16px; margin-bottom: 22px; display: flex; align-items: center;
+    flex-wrap: wrap; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .filter-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .filter-label { font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+
+  .range-btn {
+    background: #F3F4F6; border: 1px solid transparent; color: var(--text-muted); font-family: inherit;
+    font-weight: 600; font-size: 12px; padding: 6px 12px; cursor: pointer; border-radius: 20px; transition: .15s;
+    min-height: 32px;
+  }
+  .range-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .range-btn:hover:not(.active) { background: #E5E7EB; }
+
+  .cat-chip {
+    background: #F9FAFB; border: 1px solid var(--line); color: var(--ink); font-family: inherit;
+    font-weight: 600; font-size: 11.5px; padding: 5px 11px; cursor: pointer; border-radius: 20px;
+    transition: .15s; opacity: 0.45; min-height: 30px;
+  }
+  .cat-chip.active { opacity: 1; border-color: currentColor; }
+
+  .filter-select, .filter-input {
+    background: #F9FAFB; border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 12px; font-size: 12px; font-weight: 500; color: var(--ink);
+    font-family: inherit; outline: none; min-height: 36px;
+  }
+  .filter-input:focus, .filter-select:focus { border-color: var(--primary); background: #FFFFFF; }
+
+  /* 8 KPI Cards Grid */
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 14px; margin-bottom: 24px;
+  }
+  .kpi {
+    padding: 16px 18px; border: 1px solid var(--line); border-radius: 14px;
+    background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    display: flex; flex-direction: column; justify-content: space-between; min-height: 118px;
+  }
+  .kpi-icon {
+    width: 34px; height: 34px; border-radius: 9px; background: var(--primary-soft); color: var(--primary);
+    display: flex; align-items: center; justify-content: center; margin-bottom: 8px;
+  }
+  .kpi-icon svg { width: 17px; height: 17px; }
+  .kpi .num { font-size: 24px; font-weight: 800; color: var(--ink); line-height: 1.1; }
+  .kpi .lbl { font-size: 12px; color: var(--text-muted); margin-top: 4px; font-weight: 500; }
+  .kpi .sub {
+    font-size: 11px; margin-top: 6px; font-weight: 700; display: inline-block;
+    padding: 2px 7px; border-radius: 20px; width: fit-content;
+  }
+  .sub.pos { color: var(--up); background: var(--up-soft); }
+  .sub.neg { color: var(--down); background: var(--down-soft); }
+  .sub.flat { color: var(--text-muted); background: #F3F4F6; }
+
+  /* Charts */
+  .section-label { font-weight: 700; font-size: 14.5px; margin: 0 0 10px; color: var(--ink); }
+  .chart-box {
+    position: relative; height: 230px; border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 20px;
+  }
+  .chart-box.tall { height: 280px; }
+  .grid-2 { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; margin-bottom: 20px; }
+
+  /* Table Card */
+  .table-card {
+    border: 1px solid var(--line); border-radius: 14px; background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04); padding: 18px; margin-bottom: 24px;
+  }
+  .table-scroll { overflow-x: auto; max-height: 520px; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th {
+    text-align: right; font-weight: 700; font-size: 11px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .03em; border-bottom: 1px solid var(--line);
+    padding: 10px 12px; background: #FAF5FF; position: sticky; top: 0; z-index: 5;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  td { text-align: right; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
+  tr:hover td { background: #F9FAFB; }
+
+  /* Status Badges */
+  .status-badge { display: inline-block; padding: 3px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
+  .badge-good { background: #ECFDF5; color: #059669; }
+  .badge-satisfactory { background: #F0FDF4; color: #16A34A; }
+  .badge-moderate { background: #FFFBEB; color: #D97706; }
+  .badge-poor { background: #FFF7ED; color: #EA580C; }
+  .badge-very-poor { background: #FEF2F2; color: #DC2626; }
+  .badge-severe { background: #450A0A; color: #F87171; }
+
+  /* Category Metric Cards */
+  .cat-card-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px; margin-bottom: 22px;
+  }
+  .cat-card {
+    background: #FFFFFF; border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .cat-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cat-card-title { font-weight: 700; font-size: 13px; color: var(--text-muted); }
+  .cat-card-value { font-size: 24px; font-weight: 800; color: var(--ink); }
+  .cat-card-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+  /* Modal Sheet Dialog */
+  .modal-backdrop {
+    display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(2px); z-index: 100; align-items: center; justify-content: center;
+    padding: 16px;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal-box {
+    background: #FFFFFF; border-radius: 16px; width: 100%; max-width: 540px;
+    padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); border: 1px solid var(--line);
+  }
+  .modal-title { font-size: 17px; font-weight: 800; margin-bottom: 8px; color: var(--ink); }
+  .modal-desc { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px; }
+  .modal-input {
+    width: 100%; background: #F8FAFC; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; font-size: 13px; font-family: inherit; margin-bottom: 10px; outline: none;
+  }
+  .modal-input:focus { border-color: var(--primary); background: #fff; }
+  .modal-status { font-size: 12px; margin-bottom: 12px; min-height: 16px; font-weight: 600; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+
+  /* =========================================================================
+     RESPONSIVE BREAKPOINTS (Desktop, Tablet, Mobile)
+     ========================================================================= */
+
+  /* TABLET & MOBILE DRAWER (<= 992px) */
+  @media (max-width: 992px) {
+    .app-shell { display: block; }
+    .hamburger-btn { display: inline-flex; }
+    .sidebar {
+      position: fixed; top: 0; left: 0; height: 100vh; width: 260px;
+      transform: translateX(-100%); box-shadow: none; z-index: 60;
+    }
+    .sidebar.open {
+      transform: translateX(0);
+      box-shadow: 4px 0 24px rgba(15, 23, 42, 0.2);
+    }
+    .main-col { padding: 18px 20px 36px; }
+    .grid-2 { grid-template-columns: 1fr; }
+    .kpi-row { grid-template-columns: repeat(4, 1fr); }
+  }
+
+  /* SMALL TABLET & PHABLET (<= 768px) */
+  @media (max-width: 768px) {
+    .main-col { padding: 16px 16px 32px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 12px; }
+    .topbar .right { width: 100%; justify-content: space-between; order: 2; }
+    .topbar .as-of { text-align: left; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .kpi { padding: 14px 14px; min-height: 110px; }
+    .kpi .num { font-size: 21px; }
+    .chart-box { height: 220px; padding: 12px; }
+    .chart-box.tall { height: 250px; }
+    .filter-bar { padding: 10px 12px; gap: 10px; }
+    .modal-box { padding: 18px; }
+  }
+
+  /* MOBILE (<= 480px) */
+  @media (max-width: 480px) {
+    .topbar h1 { font-size: 19px; }
+    .topbar .right { flex-direction: column; align-items: stretch; gap: 8px; }
+    .topbar .right .btn { width: 100%; }
+    .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .kpi { padding: 12px 10px; }
+    .kpi .num { font-size: 19px; }
+    .kpi .lbl { font-size: 11px; }
+    .chart-box { height: 210px; padding: 10px; }
+    .chart-box.tall { height: 240px; }
+    .filter-group { width: 100%; }
+    .filter-select, .filter-input { width: 100%; }
+    .cat-card-grid { grid-template-columns: 1fr; }
+    .modal-actions { flex-direction: column; }
+    .modal-actions .btn { width: 100%; }
+  }
+
+  /* SMALL COMPACT SCREENS (<= 340px) */
+  @media (max-width: 340px) {
+    .kpi-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app-shell">
+  <!-- Left Side Status / Nav Bar (Drawer on mobile/tablet) -->
+  <aside class="sidebar" id="app-sidebar">
+    <div class="logo-row">
+      <div class="logo-icon">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+      </div>
+      <div>
+        <div class="brandname" id="sidebar-brand">Sohlene</div>
+        <div class="brandsub" id="sidebar-sub">Lab Grown Diamonds</div>
+      </div>
+    </div>
+    <div class="nav-label">Status Views</div>
+    <nav id="app-nav">
+      <div class="nav-item active" data-tab="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-tab="entries">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 8L12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/></svg>
+        Entries
+      </div>
+      <div class="nav-item" data-tab="categories">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 3.5"/></svg>
+        Categories
+      </div>
+      <div class="nav-item" data-tab="reports">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
+        Reports
+      </div>
+    </nav>
+  </aside>
+
+  <!-- Backdrop for mobile/tablet drawer -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <!-- Main Viewport -->
+  <main class="main-col">
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <!-- Hamburger button visible on tablet and mobile -->
+        <button class="hamburger-btn" id="btn-hamburger" type="button" aria-label="Open Navigation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div>
+          <div class="crumb" id="dataset-crumb">Sohlene / Stock Ledger</div>
+          <h1 id="page-title">Dashboard</h1>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="as-of">
+          Last entry: <b id="ss-lastdate">—</b><br>
+          <span id="ss-refreshtime">Auto-Sync Active</span>
+        </div>
+
+        <!-- Google Sheet Connect Button -->
+        <button class="btn btn-outline" id="btn-open-gsheet" title="Connect a Live Google Sheet">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <span id="gsheet-btn-label">Connect Google Sheet</span>
+        </button>
+
+        <!-- Sync Now Button -->
+        <button class="btn btn-outline" id="btn-sync-now" style="display:none;" title="Fetch latest row from Google Sheet">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 11-.57-8.38l5.67-5.67"/></svg>
+          Sync Now
+        </button>
+
+        <!-- File Upload Button -->
+        <label class="btn btn-primary">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Upload Excel / CSV
+          <input type="file" id="file-uploader" accept=".xlsx,.xls,.csv" style="display:none;">
+        </label>
+      </div>
+    </header>
+
+    <!-- Dynamic Filter Bar -->
+    <section class="filter-bar" id="filter-bar-container"></section>
+
+    <!-- Content Area for Active View -->
+    <div id="dashboard-body"></div>
+  </main>
+</div>
+
+<!-- Modal: Connect Google Sheet -->
+<div class="modal-backdrop" id="gsheet-modal">
+  <div class="modal-box">
+    <div class="modal-title">Connect Live Google Sheet</div>
+    <div class="modal-desc">
+      Paste your Google Sheet link below. The dashboard updates automatically in real-time.
+      <br><br>
+      <strong style="color:var(--ink);">Important:</strong> Click <strong>Share</strong> in Google Sheets and ensure General Access is set to <strong>"Anyone with the link can view"</strong>.
+    </div>
+    <input type="text" class="modal-input" id="gsheet-url-input" placeholder="https://docs.google.com/spreadsheets/d/...">
+    <div id="gsheet-status" class="modal-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="btn-modal-cancel">Cancel</button>
+      <button class="btn btn-outline" id="btn-modal-disconnect" style="display:none; color:var(--down);">Disconnect</button>
+      <button class="btn btn-success" id="btn-modal-save">Connect &amp; Sync</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  // Baseline Stock Data from Daily_Stock_Count.xlsx (Matches reference screenshot)
+  const STOCK_INITIAL = [
+    {"Date":"03.06.2026","Rings":0,"Earrings":0,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":0},
+    {"Date":"03.07.2026","Rings":8,"Earrings":0,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"04.07.2026","Rings":6,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":7},
+    {"Date":"06.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"07.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"08.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"09.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"10.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":8},
+    {"Date":"11.07.2026","Rings":7,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":8},
+    {"Date":"13.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":6,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"14.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"15.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"16.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"17.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"18.07.2026","Rings":12,"Earrings":1,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":13},
+    {"Date":"20.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":9,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"21.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"22.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"23.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"24.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"25.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"27.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"28.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"29.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"30.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"31.07.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"01.08.2026","Rings":17,"Earrings":5,"Bracelet":0,"Bangle":0,"Necklace":0,"Pendant":0,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":22},
+    {"Date":"03.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":9,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"04.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"05.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"06.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"07.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"08.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"10.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"11.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"12.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"13.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"14.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"17.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"18.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"19.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"20.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"21.08.2026","Rings":20,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":1,"Sale":0,"Total":31},
+    {"Date":"22.08.2026","Rings":22,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":2,"Sent for repair":0,"Sale":0,"Total":33},
+    {"Date":"24.08.2026","Rings":22,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":33},
+    {"Date":"25.08.2026","Rings":22,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":33},
+    {"Date":"26.08.2026","Rings":22,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":33},
+    {"Date":"27.08.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":32},
+    {"Date":"29.08.2026","Rings":18,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":29},
+    {"Date":"31.08.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":1,"Total":32},
+    {"Date":"01.09.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":32},
+    {"Date":"02.09.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":32},
+    {"Date":"03.09.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":32},
+    {"Date":"04.09.2026","Rings":21,"Earrings":8,"Bracelet":2,"Bangle":0,"Necklace":0,"Pendant":1,"Added to stock":0,"Sent for repair":0,"Sale":0,"Total":32}
+  ];
+
+  const ICONS = {
+    box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 8L12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
+    plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>',
+    tag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.6 12.6L12 21.2 2.8 12 11.4 3.4H20.6z"/><circle cx="16" cy="8" r="1.4" fill="currentColor"/></svg>',
+    wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.7 6.3a4 4 0 11-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 015.4-5.4l-3 3-2-2 3-3z"/></svg>',
+    trend: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg>',
+    star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l2.6 5.6 6.1.6-4.6 4.1 1.3 6-5.4-3.1-5.4 3.1 1.3-6-4.6-4.1 6.1-.6z"/></svg>',
+    chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>'
+  };
+
+  const PALETTE = ['#5865F2', '#0EA5E9', '#059669', '#F59E0B', '#EC4899', '#64748B', '#8B5CF6', '#14B8A6', '#F97316', '#2563EB'];
+  const AQI_SEVERITY_COLORS = { 'Good':'#059669', 'Satisfactory':'#16A34A', 'Moderate':'#D97706', 'Poor':'#EA580C', 'Very Poor':'#DC2626', 'Severe':'#991B1B' };
+
+  let currentTab = 'dashboard';
+  let activeDataMode = 'STOCK'; // 'STOCK' or 'AQI'
+  let currentRows = [];
+  let currentHeaders = [];
+  let activeStockCategories = new Set(['Rings', 'Earrings', 'Bracelet', 'Bangle', 'Necklace', 'Pendant']);
+  let timeFilter = 'all';
+  let aqiCityFilter = 'ALL';
+  let tableSearchQuery = '';
+
+  let chartInstances = {};
+  let currentSheetConfig = null;
+  let autoSyncInterval = null;
+
+  function cleanVal(v) {
+    if (v === undefined || v === null || v === '') return 0;
+    if (typeof v === 'number') return v;
+    let s = String(v).replace(/[₹$€£,%\s]/g, '');
+    let n = parseFloat(s);
+    return isNaN(n) ? 0 : n;
+  }
+
+  function parseDateStr(str) {
+    if (!str) return null;
+    let s = String(str).trim();
+    let m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+    if (m) return new Date(+m[3], +m[2]-1, +m[1]);
+    let d = new Date(s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function fmtDate(str) {
+    let d = parseDateStr(str);
+    if (!d) return str || '—';
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  }
+
+  function destroyAllCharts() {
+    Object.keys(chartInstances).forEach(k => {
+      if (chartInstances[k]) { chartInstances[k].destroy(); delete chartInstances[k]; }
+    });
+  }
+
+  function detectSchema(headers, rows) {
+    const hLower = headers.map(h => h.toLowerCase().trim());
+    const isStock = ['rings', 'earrings', 'bracelet', 'bangle', 'necklace', 'added to stock', 'sent for repair'].some(k => hLower.includes(k));
+    return isStock ? 'STOCK' : 'AQI';
+  }
+
+  function setDataset(rows, title) {
+    if (!rows || !rows.length) return;
+    currentRows = rows;
+    currentHeaders = Object.keys(rows[0]);
+    activeDataMode = detectSchema(currentHeaders, rows);
+
+    const crumb = document.getElementById('dataset-crumb');
+    const brand = document.getElementById('sidebar-brand');
+    const brandsub = document.getElementById('sidebar-sub');
+
+    if (activeDataMode === 'STOCK') {
+      crumb.textContent = `${title || 'Sohlene'} / Stock Ledger`;
+      brand.textContent = 'Sohlene';
+      brandsub.textContent = 'Lab Grown Diamonds';
+    } else {
+      crumb.textContent = `${title || 'Environmental Monitor'} / Air Quality Ledger`;
+      brand.textContent = 'AQI Monitor';
+      brandsub.textContent = 'State Environmental Board';
+    }
+
+    renderFilterBar();
+    renderView();
+  }
+
+  // --- FILTER BAR BUILDER ---
+  function renderFilterBar() {
+    const bar = document.getElementById('filter-bar-container');
+    bar.innerHTML = '';
+
+    if (activeDataMode === 'STOCK') {
+      bar.innerHTML = `
+        <div class="filter-group">
+          <span class="filter-label">Show</span>
+          <button class="range-btn ${timeFilter==='7'?'active':''}" data-r="7">Last 7</button>
+          <button class="range-btn ${timeFilter==='14'?'active':''}" data-r="14">Last 14</button>
+          <button class="range-btn ${timeFilter==='30'?'active':''}" data-r="30">Last 30</button>
+          <button class="range-btn ${timeFilter==='all'?'active':''}" data-r="all">All time</button>
+        </div>
+        <div class="filter-group" id="stock-chips-group">
+          <span class="filter-label">Categories</span>
+          ${['Rings','Earrings','Bracelet','Bangle','Necklace','Pendant'].map((c, i) => `
+            <button class="cat-chip ${activeStockCategories.has(c)?'active':''}" style="color:${PALETTE[i]};" data-cat="${c}">${c}</button>
+          `).join('')}
+          <button id="btn-select-all" style="background:none; border:none; color:var(--primary); font-size:11.5px; font-weight:600; cursor:pointer; padding:0 4px;">select all</button>
+        </div>
+      `;
+
+      bar.querySelectorAll('.range-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          bar.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          timeFilter = btn.dataset.r;
+          renderView();
+        });
+      });
+
+      bar.querySelectorAll('.cat-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const c = chip.dataset.cat;
+          if (activeStockCategories.has(c)) { activeStockCategories.delete(c); chip.classList.remove('active'); }
+          else { activeStockCategories.add(c); chip.classList.add('active'); }
+          renderView();
+        });
+      });
+
+      document.getElementById('btn-select-all').addEventListener('click', () => {
+        ['Rings','Earrings','Bracelet','Bangle','Necklace','Pendant'].forEach(c => activeStockCategories.add(c));
+        bar.querySelectorAll('.cat-chip').forEach(b => b.classList.add('active'));
+        renderView();
+      });
+
+    } else {
+      const uniqueCities = [...new Set(currentRows.map(r => String(r['City']||'').trim()).filter(Boolean))].sort();
+      bar.innerHTML = `
+        <div class="filter-group">
+          <span class="filter-label">City:</span>
+          <select class="filter-select" id="aqi-city-select">
+            <option value="ALL">All Cities (${uniqueCities.length})</option>
+            ${uniqueCities.map(c => `<option value="${c}" ${aqiCityFilter===c?'selected':''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="filter-group" style="margin-left:auto;">
+          <input type="text" class="filter-input" id="aqi-search-box" placeholder="Filter stations or cities..." value="${tableSearchQuery}">
+        </div>
+      `;
+
+      document.getElementById('aqi-city-select').addEventListener('change', (e) => {
+        aqiCityFilter = e.target.value;
+        renderView();
+      });
+      document.getElementById('aqi-search-box').addEventListener('input', (e) => {
+        tableSearchQuery = e.target.value.trim().toLowerCase();
+        renderView();
+      });
+    }
+  }
+
+  // --- TAB ROUTING DISPATCHER ---
+  const TAB_TITLES = {
+    dashboard: 'Dashboard',
+    entries: 'Entries & Ledger',
+    categories: 'Categories & Distribution',
+    reports: 'Reports & Analytics'
+  };
+
+  function renderView() {
+    destroyAllCharts();
+    const container = document.getElementById('dashboard-body');
+    document.getElementById('page-title').textContent = TAB_TITLES[currentTab] || 'Dashboard';
+
+    if (currentTab === 'dashboard') {
+      activeDataMode === 'STOCK' ? renderStockDashboard(container) : renderAqiDashboard(container);
+    } else if (currentTab === 'entries') {
+      renderEntriesView(container);
+    } else if (currentTab === 'categories') {
+      activeDataMode === 'STOCK' ? renderStockCategories(container) : renderAqiCategories(container);
+    } else if (currentTab === 'reports') {
+      activeDataMode === 'STOCK' ? renderStockReports(container) : renderAqiReports(container);
+    }
+  }
+
+  function getStockFilteredRows() {
+    let rows = currentRows.slice();
+    if (timeFilter !== 'all') {
+      let n = parseInt(timeFilter, 10);
+      if (!isNaN(n)) rows = rows.slice(-n);
+    }
+    return rows;
+  }
+
+  // =========================================================================
+  // 1. DASHBOARD VIEW (Reference Screenshot)
+  // =========================================================================
+  function renderStockDashboard(container) {
+    const rows = getStockFilteredRows();
+    const latest = rows[rows.length - 1];
+    const prev = rows.length > 1 ? rows[rows.length - 2] : null;
+    const first = rows[0];
+
+    const cats = Array.from(activeStockCategories);
+    const rowTotal = r => cats.reduce((sum, c) => sum + cleanVal(r[c]), 0);
+
+    const latestTotal = rowTotal(latest);
+    const prevTotal = prev ? rowTotal(prev) : latestTotal;
+    const firstTotal = rowTotal(first);
+    const diff = latestTotal - prevTotal;
+    const netChange = latestTotal - firstTotal;
+
+    const diffBadge = diff > 0 
+      ? `<div class="sub pos">+${diff} vs ${prev ? fmtDate(prev['Date']) : 'prev'}</div>`
+      : (diff < 0 ? `<div class="sub neg">${diff} vs ${prev ? fmtDate(prev['Date']) : 'prev'}</div>` : `<div class="sub flat">0 vs prev</div>`);
+
+    const sumCol = k => rows.reduce((s, r) => s + cleanVal(r[k]), 0);
+    const totalAdded = sumCol('Added to stock');
+    const totalSale = sumCol('Sale');
+    const totalRepair = sumCol('Sent for repair');
+    const avgTotal = Math.round(rows.reduce((s, r) => s + rowTotal(r), 0) / rows.length);
+
+    let topCat = 'Rings', topVal = -1;
+    cats.forEach(c => {
+      let v = cleanVal(latest[c]);
+      if (v > topVal) { topVal = v; topCat = c; }
+    });
+
+    document.getElementById('ss-lastdate').textContent = fmtDate(latest['Date']);
+
+    container.innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.box}</div>
+          <div class="num">${latestTotal}</div>
+          <div class="lbl">pieces in stock (filtered)</div>
+          ${diffBadge}
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.plus}</div>
+          <div class="num">${totalAdded}</div>
+          <div class="lbl">Added to stock, this range</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.tag}</div>
+          <div class="num">${totalSale}</div>
+          <div class="lbl">Sale, this range</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.wrench}</div>
+          <div class="num">${totalRepair}</div>
+          <div class="lbl">Sent for repair, this range</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.trend}</div>
+          <div class="num">${netChange>=0?'+':''}${netChange}</div>
+          <div class="lbl">net change since ${fmtDate(first['Date'])}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.star}</div>
+          <div class="num">${topCat}</div>
+          <div class="lbl">highest category (${topVal})</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.chart}</div>
+          <div class="num">${avgTotal}</div>
+          <div class="lbl">average total</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.calendar}</div>
+          <div class="num">${rows.length}</div>
+          <div class="lbl">days in range</div>
+        </div>
+      </div>
+
+      <div class="section-label">Total, over time — area chart</div>
+      <div class="chart-box tall"><canvas id="stock-area-chart"></canvas></div>
+
+      <div class="grid-2">
+        <div>
+          <div class="section-label">By category, latest — bar chart</div>
+          <div class="chart-box"><canvas id="stock-bar-chart"></canvas></div>
+        </div>
+        <div>
+          <div class="section-label">Composition, latest — pie chart</div>
+          <div class="chart-box"><canvas id="stock-pie-chart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="section-label">Added to stock / Sale / Sent for repair — bar chart</div>
+      <div class="chart-box"><canvas id="stock-flow-chart"></canvas></div>
+    `;
+
+    // 1. Stock Area Chart
+    const ctxArea = document.getElementById('stock-area-chart').getContext('2d');
+    chartInstances.area = new Chart(ctxArea, {
+      type: 'line',
+      data: {
+        labels: rows.map(r => fmtDate(r['Date'])),
+        datasets: [{
+          data: rows.map(rowTotal),
+          borderColor: '#5865F2',
+          borderWidth: 2.5,
+          backgroundColor: 'rgba(88, 101, 242, 0.08)',
+          tension: 0.25,
+          fill: true, pointRadius: 0, pointHoverRadius: 5
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 10 } } },
+          y: { min: 0, max: 35, grid: { color: '#E5E7EB' }, ticks: { color: '#6B7280', font: { size: 10 } } }
+        }
+      }
+    });
+
+    // 2. Bar Chart (Y-Axis: Categories, X-Axis: Count)
+    const ctxBar = document.getElementById('stock-bar-chart').getContext('2d');
+    const barLabels = ['Rings', 'Earrings', 'Bracelet', 'Bangle', 'Necklace', 'Pendant'];
+    const barValues = barLabels.map(c => cleanVal(latest[c]));
+    const barColors = barLabels.map((c, i) => PALETTE[i % PALETTE.length]);
+
+    chartInstances.bar = new Chart(ctxBar, {
+      type: 'bar',
+      data: {
+        labels: barLabels,
+        datasets: [{ data: barValues, backgroundColor: barColors, borderRadius: 4 }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { min: 0, max: 25, grid: { color: '#E5E7EB' }, ticks: { color: '#6B7280', font: { size: 10 } } },
+          y: { grid: { display: false }, ticks: { color: '#1F2937', font: { size: 11 } } }
+        }
+      }
+    });
+
+    // 3. Pie Chart
+    const ctxPie = document.getElementById('stock-pie-chart').getContext('2d');
+    const activePieCats = barLabels.filter(c => cleanVal(latest[c]) > 0);
+    const activePieVals = activePieCats.map(c => cleanVal(latest[c]));
+    const activePieCols = activePieCats.map(c => barColors[barLabels.indexOf(c)]);
+
+    chartInstances.pie = new Chart(ctxPie, {
+      type: 'pie',
+      data: {
+        labels: activePieCats,
+        datasets: [{ data: activePieVals, backgroundColor: activePieCols, borderWidth: 2, borderColor: '#fff' }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } }
+      }
+    });
+
+    // 4. Flow Bar Chart
+    const ctxFlow = document.getElementById('stock-flow-chart').getContext('2d');
+    const flowRows = rows.slice(-15);
+    chartInstances.flow = new Chart(ctxFlow, {
+      type: 'bar',
+      data: {
+        labels: flowRows.map(r => fmtDate(r['Date'])),
+        datasets: [
+          { label: 'Added to stock', data: flowRows.map(r => cleanVal(r['Added to stock'])), backgroundColor: '#059669', borderRadius: 3 },
+          { label: 'Sale', data: flowRows.map(r => cleanVal(r['Sale'])), backgroundColor: '#DC2626', borderRadius: 3 },
+          { label: 'Sent for repair', data: flowRows.map(r => cleanVal(r['Sent for repair'])), backgroundColor: '#F59E0B', borderRadius: 3 }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 9 } } },
+          y: { grid: { color: '#E5E7EB' }, ticks: { color: '#6B7280', font: { size: 10 } } }
+        }
+      }
+    });
+  }
+
+  function renderAqiDashboard(container) {
+    let rows = currentRows.slice();
+    if (aqiCityFilter !== 'ALL') {
+      rows = rows.filter(r => String(r['City']||'').trim() === aqiCityFilter);
+    }
+    if (tableSearchQuery) {
+      rows = rows.filter(r => {
+        let st = String(r['Station Name']||'').toLowerCase();
+        let ct = String(r['City']||'').toLowerCase();
+        return st.includes(tableSearchQuery) || ct.includes(tableSearchQuery);
+      });
+    }
+
+    const aqiValues = rows.map(r => cleanVal(r['AQI'])).filter(v => v > 0);
+    const avgAqi = aqiValues.length ? Math.round(aqiValues.reduce((a,b)=>a+b,0) / aqiValues.length) : 0;
+    const maxAqi = aqiValues.length ? Math.max(...aqiValues) : 0;
+    const minAqi = aqiValues.length ? Math.min(...aqiValues) : 0;
+
+    let worstStation = '—', bestStation = '—';
+    rows.forEach(r => {
+      let v = cleanVal(r['AQI']);
+      if (v === maxAqi) worstStation = r['Station Name'] || r['City'];
+      if (v === minAqi && v > 0) bestStation = r['Station Name'] || r['City'];
+    });
+
+    const uniqueCities = new Set(rows.map(r => r['City']).filter(Boolean)).size;
+    const getCat = v => (!v ? 'No Data' : (v<=50?'Good':(v<=100?'Satisfactory':(v<=200?'Moderate':(v<=300?'Poor':(v<=400?'Very Poor':'Severe'))))));
+
+    const catCounts = {};
+    rows.forEach(r => {
+      let c = r['Category'] || getCat(cleanVal(r['AQI']));
+      catCounts[c] = (catCounts[c] || 0) + 1;
+    });
+
+    document.getElementById('ss-lastdate').textContent = rows[0] && rows[0]['Date'] ? fmtDate(rows[0]['Date']) : 'Current Log';
+
+    container.innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.chart}</div>
+          <div class="num">${avgAqi}</div>
+          <div class="lbl">average AQI (filtered)</div>
+          <div class="sub pos">State Index</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.wrench}</div>
+          <div class="num">${maxAqi}</div>
+          <div class="lbl">worst station (highest AQI)</div>
+          <div class="sub neg">${worstStation}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.star}</div>
+          <div class="num">${minAqi}</div>
+          <div class="lbl">cleanest station (lowest AQI)</div>
+          <div class="sub pos">${bestStation}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.tag}</div>
+          <div class="num" style="font-size:20px;">${catCounts['Good'] || 0} Stations</div>
+          <div class="lbl">Good (0-50 AQI) Air Quality</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.trend}</div>
+          <div class="num">${maxAqi - minAqi}</div>
+          <div class="lbl">spread between worst & best</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.plus}</div>
+          <div class="num">${uniqueCities}</div>
+          <div class="lbl">cities monitored</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.box}</div>
+          <div class="num">${rows.length}</div>
+          <div class="lbl">total monitoring stations</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.calendar}</div>
+          <div class="num">${aqiValues.length}</div>
+          <div class="lbl">active reporting stations</div>
+        </div>
+      </div>
+
+      <div class="section-label">City-wise Average AQI — profile chart</div>
+      <div class="chart-box tall"><canvas id="aqi-city-profile-chart"></canvas></div>
+
+      <div class="grid-2">
+        <div>
+          <div class="section-label">Top 10 Stations by AQI — bar chart</div>
+          <div class="chart-box"><canvas id="aqi-stations-bar-chart"></canvas></div>
+        </div>
+        <div>
+          <div class="section-label">AQI Category breakdown — pie chart</div>
+          <div class="chart-box"><canvas id="aqi-pie-chart"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    // City profile bar chart
+    const cityAgg = {};
+    rows.forEach(r => {
+      let c = r['City'];
+      let v = cleanVal(r['AQI']);
+      if (c && v > 0) {
+        if (!cityAgg[c]) cityAgg[c] = { sum: 0, count: 0 };
+        cityAgg[c].sum += v;
+        cityAgg[c].count += 1;
+      }
+    });
+
+    const cityLabels = Object.keys(cityAgg).sort((a,b) => (cityAgg[b].sum/cityAgg[b].count) - (cityAgg[a].sum/cityAgg[a].count)).slice(0, 16);
+    const cityAvgValues = cityLabels.map(c => Math.round(cityAgg[c].sum / cityAgg[c].count));
+
+    const ctxCity = document.getElementById('aqi-city-profile-chart').getContext('2d');
+    chartInstances.cityProfile = new Chart(ctxCity, {
+      type: 'bar',
+      data: {
+        labels: cityLabels,
+        datasets: [{
+          data: cityAvgValues,
+          backgroundColor: cityAvgValues.map(v => v > 100 ? '#DC2626' : (v > 50 ? '#F59E0B' : '#059669')),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 10 } } },
+          y: { grid: { color: '#E5E7EB' }, ticks: { color: '#6B7280', font: { size: 10 } } }
+        }
+      }
+    });
+
+    // Top Stations horizontal bar chart
+    const validStations = rows.filter(r => cleanVal(r['AQI']) > 0)
+      .sort((a,b) => cleanVal(b['AQI']) - cleanVal(a['AQI'])).slice(0, 10);
+
+    const ctxStBar = document.getElementById('aqi-stations-bar-chart').getContext('2d');
+    chartInstances.stationBar = new Chart(ctxStBar, {
+      type: 'bar',
+      data: {
+        labels: validStations.map(r => r['Station Name'] || r['City']),
+        datasets: [{
+          data: validStations.map(r => cleanVal(r['AQI'])),
+          backgroundColor: validStations.map(r => cleanVal(r['AQI']) > 100 ? '#DC2626' : (cleanVal(r['AQI']) > 50 ? '#F59E0B' : '#059669')),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#E5E7EB' }, ticks: { color: '#6B7280', font: { size: 10 } } },
+          y: { grid: { display: false }, ticks: { color: '#1F2937', font: { size: 10 } } }
+        }
+      }
+    });
+
+    // Pie chart
+    const ctxPie = document.getElementById('aqi-pie-chart').getContext('2d');
+    const pLabels = Object.keys(catCounts);
+    const pValues = Object.values(catCounts);
+    chartInstances.aqiPie = new Chart(ctxPie, {
+      type: 'pie',
+      data: {
+        labels: pLabels,
+        datasets: [{ data: pValues, backgroundColor: pLabels.map(l => AQI_SEVERITY_COLORS[l] || '#64748B'), borderWidth: 2, borderColor: '#fff' }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } }
+      }
+    });
+  }
+
+  // =========================================================================
+  // 2. ENTRIES VIEW (Searchable Ledger & CSV Export)
+  // =========================================================================
+  function renderEntriesView(container) {
+    let rows = activeDataMode === 'STOCK' ? getStockFilteredRows() : currentRows.slice();
+
+    if (tableSearchQuery) {
+      rows = rows.filter(r => {
+        return Object.values(r).some(v => String(v).toLowerCase().includes(tableSearchQuery));
+      });
+    }
+
+    container.innerHTML = `
+      <div class="table-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px;">
+          <div>
+            <div class="section-label" style="margin:0;">Data Entries Ledger</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Showing ${rows.length} records across ${currentHeaders.length} columns</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <input type="text" class="filter-input" id="entries-search-input" placeholder="Search any column..." value="${tableSearchQuery}">
+            <button class="btn btn-outline" id="btn-export-csv">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                ${currentHeaders.map(h => `<th>${h}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.slice().reverse().map(r => `
+                <tr>
+                  ${currentHeaders.map((h, i) => {
+                    let val = r[h] !== undefined && r[h] !== null ? r[h] : '';
+                    if (h === 'Date') return `<td>${fmtDate(val)}</td>`;
+                    if (/category/i.test(h) && val) {
+                      let cls = 'badge-' + String(val).toLowerCase().replace(/\s+/g, '-');
+                      return `<td><span class="status-badge ${cls}">${val}</span></td>`;
+                    }
+                    return `<td>${val}</td>`;
+                  }).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('entries-search-input').addEventListener('input', (e) => {
+      tableSearchQuery = e.target.value.trim().toLowerCase();
+      renderEntriesView(container);
+    });
+
+    document.getElementById('btn-export-csv').addEventListener('click', () => {
+      const csv = Papa.unparse(rows);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${activeDataMode.toLowerCase()}_entries_export.csv`;
+      a.click();
+    });
+  }
+
+  // =========================================================================
+  // 3. CATEGORIES VIEW (In-Depth Category Analytics & Multi-Line Trend)
+  // =========================================================================
+  function renderStockCategories(container) {
+    const rows = getStockFilteredRows();
+    const latest = rows[rows.length - 1];
+    const cats = ['Rings', 'Earrings', 'Bracelet', 'Bangle', 'Necklace', 'Pendant'];
+    const totalPieces = cats.reduce((s, c) => s + cleanVal(latest[c]), 0);
+
+    container.innerHTML = `
+      <div class="cat-card-grid">
+        ${cats.map((c, i) => {
+          let count = cleanVal(latest[c]);
+          let pct = totalPieces > 0 ? ((count / totalPieces) * 100).toFixed(1) : '0';
+          return `
+            <div class="cat-card">
+              <div class="cat-card-header">
+                <span class="cat-card-title">${c}</span>
+                <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${PALETTE[i]};"></span>
+              </div>
+              <div class="cat-card-value">${count} <span style="font-size:14px; font-weight:500; color:var(--text-muted);">pcs</span></div>
+              <div class="cat-card-sub">${pct}% of active inventory</div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+
+      <div class="section-label">Category Quantities Over Time — multi-line trend</div>
+      <div class="chart-box tall"><canvas id="cat-trend-chart"></canvas></div>
+
+      <div class="grid-2">
+        <div>
+          <div class="section-label">Inventory Share by Category — ranked bar chart</div>
+          <div class="chart-box"><canvas id="cat-rank-chart"></canvas></div>
+        </div>
+        <div>
+          <div class="section-label">Category Proportions — donut chart</div>
+          <div class="chart-box"><canvas id="cat-donut-chart"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    // 1. Multi-Line Trend Chart
+    const ctxTrend = document.getElementById('cat-trend-chart').getContext('2d');
+    chartInstances.catTrend = new Chart(ctxTrend, {
+      type: 'line',
+      data: {
+        labels: rows.map(r => fmtDate(r['Date'])),
+        datasets: cats.map((c, i) => ({
+          label: c,
+          data: rows.map(r => cleanVal(r[c])),
+          borderColor: PALETTE[i],
+          backgroundColor: PALETTE[i],
+          borderWidth: 2,
+          tension: 0.2,
+          pointRadius: 0,
+          pointHoverRadius: 4
+        }))
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 10 } } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 }, color: '#6B7280' } },
+          y: { grid: { color: '#E5E7EB' }, ticks: { font: { size: 10 } } }
+        }
+      }
+    });
+
+    // 2. Ranked Bar Chart
+    const ctxRank = document.getElementById('cat-rank-chart').getContext('2d');
+    chartInstances.catRank = new Chart(ctxRank, {
+      type: 'bar',
+      data: {
+        labels: cats,
+        datasets: [{
+          data: cats.map(c => cleanVal(latest[c])),
+          backgroundColor: PALETTE.slice(0, cats.length),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#E5E7EB' } },
+          y: { grid: { display: false } }
+        }
+      }
+    });
+
+    // 3. Donut Chart
+    const ctxDonut = document.getElementById('cat-donut-chart').getContext('2d');
+    const activeCats = cats.filter(c => cleanVal(latest[c]) > 0);
+    chartInstances.catDonut = new Chart(ctxDonut, {
+      type: 'doughnut',
+      data: {
+        labels: activeCats,
+        datasets: [{
+          data: activeCats.map(c => cleanVal(latest[c])),
+          backgroundColor: activeCats.map(c => PALETTE[cats.indexOf(c)]),
+          borderWidth: 2, borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } }
+      }
+    });
+  }
+
+  function renderAqiCategories(container) {
+    const rows = currentRows;
+    const getCat = v => (!v ? 'No Data' : (v<=50?'Good':(v<=100?'Satisfactory':(v<=200?'Moderate':(v<=300?'Poor':(v<=400?'Very Poor':'Severe'))))));
+
+    const tierCounts = { 'Good':0, 'Satisfactory':0, 'Moderate':0, 'Poor':0, 'Very Poor':0, 'Severe':0 };
+    rows.forEach(r => {
+      let c = r['Category'] || getCat(cleanVal(r['AQI']));
+      if (tierCounts[c] !== undefined) tierCounts[c]++;
+    });
+
+    container.innerHTML = `
+      <div class="cat-card-grid">
+        ${Object.keys(tierCounts).map(t => `
+          <div class="cat-card">
+            <div class="cat-card-header">
+              <span class="cat-card-title">${t}</span>
+              <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:${AQI_SEVERITY_COLORS[t]};"></span>
+            </div>
+            <div class="cat-card-value">${tierCounts[t]} <span style="font-size:13px; font-weight:500; color:var(--text-muted);">stations</span></div>
+            <div class="cat-card-sub">${((tierCounts[t]/rows.length)*100).toFixed(1)}% of reporting network</div>
+          </div>
+        `).join('')}
+      </div>
+
+      <div class="grid-2">
+        <div>
+          <div class="section-label">Station Distribution Across Tiers — bar chart</div>
+          <div class="chart-box"><canvas id="aqi-tier-bar"></canvas></div>
+        </div>
+        <div>
+          <div class="section-label">Air Quality Severity Proportion — donut chart</div>
+          <div class="chart-box"><canvas id="aqi-tier-donut"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    const ctxTBar = document.getElementById('aqi-tier-bar').getContext('2d');
+    chartInstances.tierBar = new Chart(ctxTBar, {
+      type: 'bar',
+      data: {
+        labels: Object.keys(tierCounts),
+        datasets: [{
+          data: Object.values(tierCounts),
+          backgroundColor: Object.keys(tierCounts).map(t => AQI_SEVERITY_COLORS[t]),
+          borderRadius: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { grid: { display: false } }, y: { grid: { color: '#E5E7EB' } } }
+      }
+    });
+
+    const ctxTDonut = document.getElementById('aqi-tier-donut').getContext('2d');
+    chartInstances.tierDonut = new Chart(ctxTDonut, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(tierCounts),
+        datasets: [{
+          data: Object.values(tierCounts),
+          backgroundColor: Object.keys(tierCounts).map(t => AQI_SEVERITY_COLORS[t]),
+          borderWidth: 2, borderColor: '#fff'
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '65%',
+        plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } }
+      }
+    });
+  }
+
+  // =========================================================================
+  // 4. REPORTS VIEW (Velocity, Inflow vs Outflow, Peak Dates)
+  // =========================================================================
+  function renderStockReports(container) {
+    const rows = getStockFilteredRows();
+    const sumCol = k => rows.reduce((s, r) => s + cleanVal(r[k]), 0);
+
+    const totalAdded = sumCol('Added to stock');
+    const totalSale = sumCol('Sale');
+    const totalRepair = sumCol('Sent for repair');
+
+    let maxPieces = -1, maxDate = '', minPieces = Infinity, minDate = '';
+    const cats = ['Rings', 'Earrings', 'Bracelet', 'Bangle', 'Necklace', 'Pendant'];
+    rows.forEach(r => {
+      let t = cats.reduce((s, c) => s + cleanVal(r[c]), 0);
+      if (t > maxPieces) { maxPieces = t; maxDate = r['Date']; }
+      if (t < minPieces) { minPieces = t; minDate = r['Date']; }
+    });
+
+    let cumAdd = 0, cumOut = 0;
+    const cumAddData = [], cumOutData = [];
+    rows.forEach(r => {
+      cumAdd += cleanVal(r['Added to stock']);
+      cumOut += (cleanVal(r['Sale']) + cleanVal(r['Sent for repair']));
+      cumAddData.push(cumAdd);
+      cumOutData.push(cumOut);
+    });
+
+    container.innerHTML = `
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.star}</div>
+          <div class="num">${maxPieces} pcs</div>
+          <div class="lbl">peak stock level</div>
+          <div class="sub pos">On ${fmtDate(maxDate)}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.trend}</div>
+          <div class="num">${minPieces} pcs</div>
+          <div class="lbl">lowest stock level</div>
+          <div class="sub flat">On ${fmtDate(minDate)}</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.plus}</div>
+          <div class="num">+${totalAdded}</div>
+          <div class="lbl">total stock inflow (added)</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon">${ICONS.wrench}</div>
+          <div class="num">${totalRepair + totalSale}</div>
+          <div class="lbl">total outflow (sold + repair)</div>
+        </div>
+      </div>
+
+      <div class="section-label">Cumulative Inflow vs. Outflow Over Time — area report</div>
+      <div class="chart-box tall"><canvas id="report-cum-chart"></canvas></div>
+
+      <div class="table-card">
+        <div class="section-label" style="margin-bottom:12px;">Inventory Movement Velocity Log</div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Daily Added</th>
+                <th>Daily Sold</th>
+                <th>Daily Sent For Repair</th>
+                <th>Net Daily Change</th>
+                <th>Cumulative Added</th>
+                <th>Cumulative Outflow</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.slice().reverse().map((r, i) => {
+                let add = cleanVal(r['Added to stock']);
+                let sld = cleanVal(r['Sale']);
+                let rep = cleanVal(r['Sent for repair']);
+                let net = add - (sld + rep);
+                return `
+                  <tr>
+                    <td><strong>${fmtDate(r['Date'])}</strong></td>
+                    <td>${add ? '+' + add : '0'}</td>
+                    <td>${sld}</td>
+                    <td>${rep}</td>
+                    <td style="font-weight:700; color:${net>0?'var(--up)':(net<0?'var(--down)':'var(--text-muted)')};">${net>0?'+'+net:net}</td>
+                    <td>${cumAddData[rows.length - 1 - i]}</td>
+                    <td>${cumOutData[rows.length - 1 - i]}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    const ctxCum = document.getElementById('report-cum-chart').getContext('2d');
+    chartInstances.cumReport = new Chart(ctxCum, {
+      type: 'line',
+      data: {
+        labels: rows.map(r => fmtDate(r['Date'])),
+        datasets: [
+          {
+            label: 'Cumulative Added (Inflow)',
+            data: cumAddData,
+            borderColor: '#059669',
+            backgroundColor: 'rgba(5, 150, 105, 0.08)',
+            fill: true, tension: 0.2, pointRadius: 0
+          },
+          {
+            label: 'Cumulative Outflow (Sold + Repaired)',
+            data: cumOutData,
+            borderColor: '#DC2626',
+            backgroundColor: 'rgba(220, 38, 38, 0.08)',
+            fill: true, tension: 0.2, pointRadius: 0
+          }
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'top', labels: { boxWidth: 10, font: { size: 11 } } } },
+        scales: {
+          x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+          y: { grid: { color: '#E5E7EB' } }
+        }
+      }
+    });
+  }
+
+  function renderAqiReports(container) {
+    const rows = currentRows.filter(r => cleanVal(r['AQI']) > 0);
+    const sortedWorst = rows.slice().sort((a,b) => cleanVal(b['AQI']) - cleanVal(a['AQI'])).slice(0, 15);
+    const sortedClean = rows.slice().sort((a,b) => cleanVal(a['AQI']) - cleanVal(b['AQI'])).slice(0, 15);
+
+    container.innerHTML = `
+      <div class="grid-2">
+        <div>
+          <div class="section-label">Top 15 Critical Stations (Highest AQI)</div>
+          <div class="chart-box tall"><canvas id="report-worst-stations"></canvas></div>
+        </div>
+        <div>
+          <div class="section-label">Top 15 Cleanest Stations (Lowest AQI)</div>
+          <div class="chart-box tall"><canvas id="report-clean-stations"></canvas></div>
+        </div>
+      </div>
+    `;
+
+    const ctxWorst = document.getElementById('report-worst-stations').getContext('2d');
+    chartInstances.worstReport = new Chart(ctxWorst, {
+      type: 'bar',
+      data: {
+        labels: sortedWorst.map(r => r['Station Name'] || r['City']),
+        datasets: [{
+          data: sortedWorst.map(r => cleanVal(r['AQI'])),
+          backgroundColor: '#DC2626', borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { grid: { color: '#E5E7EB' } }, y: { grid: { display: false } } }
+      }
+    });
+
+    const ctxClean = document.getElementById('report-clean-stations').getContext('2d');
+    chartInstances.cleanReport = new Chart(ctxClean, {
+      type: 'bar',
+      data: {
+        labels: sortedClean.map(r => r['Station Name'] || r['City']),
+        datasets: [{
+          data: sortedClean.map(r => cleanVal(r['AQI'])),
+          backgroundColor: '#059669', borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { grid: { color: '#E5E7EB' } }, y: { grid: { display: false } } }
+      }
+    });
+  }
+
+  // =========================================================================
+  // PARSER ENGINES (Matrix Table & CSV)
+  // =========================================================================
+  function parseDataMatrix(matrix) {
+    if (!matrix || !matrix.length) throw new Error('Data sheet is empty');
+    let bestRowIdx = 0, maxScore = -1;
+    for (let i = 0; i < Math.min(matrix.length, 15); i++) {
+      let r = matrix[i];
+      let strCount = r.filter(c => typeof c === 'string' && c.trim().length > 0 && isNaN(Number(c.trim()))).length;
+      if (strCount > maxScore) {
+        maxScore = strCount;
+        bestRowIdx = i;
+      }
+    }
+
+    const headers = matrix[bestRowIdx].map((c, idx) => String(c || '').trim() || `Column_${idx+1}`);
+    const parsedRows = [];
+    for (let i = bestRowIdx + 1; i < matrix.length; i++) {
+      let r = matrix[i];
+      if (!r || !r.some(c => String(c || '').trim() !== '')) continue;
+      let obj = {};
+      headers.forEach((h, idx) => {
+        let cell = r[idx];
+        obj[h] = cell !== undefined && cell !== null ? cell : '';
+      });
+      parsedRows.push(obj);
+    }
+    return parsedRows;
+  }
+
+  function parseExcelBuffer(buf) {
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    return parseDataMatrix(matrix);
+  }
+
+  function parseCsvText(text) {
+    const parsed = Papa.parse(text.trim(), { skipEmptyLines: true });
+    return parseDataMatrix(parsed.data);
+  }
+
+  function parseGvizResponseToMatrix(data) {
+    const table = data.table || {};
+    const cols = table.cols || [];
+    const rows = table.rows || [];
+
+    const matrix = [];
+    const colLabels = cols.map(c => (c.label || '').trim());
+    const hasColLabels = colLabels.some(l => l.length > 0);
+    if (hasColLabels) {
+      matrix.push(colLabels);
+    }
+
+    rows.forEach(r => {
+      const cells = r.c || [];
+      const rowVals = [];
+      cells.forEach(cell => {
+        if (!cell) { rowVals.push(''); return; }
+        let v = cell.v;
+        let f = cell.f;
+        if (f !== undefined && (v === null || typeof v === 'object' || String(v).startsWith('Date('))) {
+          rowVals.push(f);
+        } else if (typeof v === 'string' && v.startsWith('Date(')) {
+          let nums = v.match(/\d+/g);
+          if (nums && nums.length >= 3) {
+            let day = String(nums[2]).padStart(2, '0');
+            let month = String(parseInt(nums[1], 10) + 1).padStart(2, '0');
+            let year = nums[0];
+            rowVals.push(`${day}.${month}.${year}`);
+          } else {
+            rowVals.push(f || v);
+          }
+        } else {
+          rowVals.push(v !== undefined && v !== null ? v : '');
+        }
+      });
+      matrix.push(rowVals);
+    });
+
+    return matrix;
+  }
+
+  // =========================================================================
+  // GOOGLE SHEETS CONNECTION (Bypasses CORS via JSONP Script Injection)
+  // =========================================================================
+  function parseGoogleSheetUrl(rawUrl) {
+    let s = rawUrl.trim();
+    if (!s) return null;
+
+    if (s.includes('/pub?') && s.includes('output=csv')) {
+      return { type: 'pub_csv', url: s, rawUrl: s };
+    }
+
+    const match = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!match) return null;
+    const sheetId = match[1];
+
+    const gidMatch = s.match(/[#&?]gid=([0-9]+)/);
+    const gid = gidMatch ? gidMatch[1] : null;
+
+    return { type: 'sheet_id', sheetId: sheetId, gid: gid, rawUrl: s };
+  }
+
+  // Method 1: JSONP script injection (100% immune to CORS on file:///)
+  function fetchViaJsonp(sheetId, gid) {
+    return new Promise((resolve, reject) => {
+      const cbName = 'gviz_cb_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('Connection timed out.'));
+      }, 10000);
+
+      function cleanup() {
+        clearTimeout(timeout);
+        delete window[cbName];
+        const s = document.getElementById(cbName);
+        if (s) s.remove();
+      }
+
+      window[cbName] = function(json) {
+        cleanup();
+        if (!json || json.status === 'error') {
+          reject(new Error((json && json.errors && json.errors[0]) ? json.errors[0].message : 'Sheet access error'));
+          return;
+        }
+        try {
+          const matrix = parseGvizResponseToMatrix(json);
+          const rows = parseDataMatrix(matrix);
+          resolve(rows);
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      let gidParam = gid ? `&gid=${gid}` : '';
+      const script = document.createElement('script');
+      script.id = cbName;
+      script.src = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=responseHandler:${cbName}${gidParam}&_t=${Date.now()}`;
+      script.onerror = function() {
+        cleanup();
+        reject(new Error('Could not load script. Check permissions.'));
+      };
+      document.body.appendChild(script);
+    });
+  }
+
+  async function fetchViaDirectCsv(sheetId, gid) {
+    let gidParam = gid ? `&gid=${gid}` : '';
+    const gvizCsvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${gidParam}&_t=${Date.now()}`;
+    const res = await fetch(gvizCsvUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    return parseCsvText(text);
+  }
+
+  async function fetchViaPublishedUrl(pubUrl) {
+    const cacheUrl = `${pubUrl}&_t=${Date.now()}`;
+    const res = await fetch(cacheUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    return parseCsvText(text);
+  }
+
+  async function loadGoogleSheetData(config) {
+    if (!config) throw new Error('No Google Sheet configuration');
+
+    if (config.type === 'pub_csv') {
+      try {
+        return await fetchViaPublishedUrl(config.url);
+      } catch (err) {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(config.url)}`;
+        const res = await fetch(proxyUrl);
+        const text = await res.text();
+        return parseCsvText(text);
+      }
+    }
+
+    // Try JSONP first
+    try {
+      return await fetchViaJsonp(config.sheetId, config.gid);
+    } catch (e1) {
+      console.warn('JSONP fetch attempt failed, trying direct GViz CSV...', e1);
+    }
+
+    // Fallback: Direct CSV
+    try {
+      return await fetchViaDirectCsv(config.sheetId, config.gid);
+    } catch (e2) {
+      console.warn('Direct GViz CSV failed, trying proxy...', e2);
+    }
+
+    // Fallback: CORS Proxy
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${config.sheetId}/export?format=csv${config.gid ? '&gid=' + config.gid : ''}`;
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(exportUrl)}`;
+    const pRes = await fetch(proxyUrl);
+    if (!pRes.ok) throw new Error('All connection channels were blocked.');
+    const pText = await pRes.text();
+    return parseCsvText(pText);
+  }
+
+  async function syncGoogleSheet(isAuto = false) {
+    if (!currentSheetConfig) return;
+    try {
+      const rows = await loadGoogleSheetData(currentSheetConfig);
+      if (!rows || !rows.length) throw new Error('Google Sheet returned 0 rows.');
+      setDataset(rows, 'Google Sheet');
+
+      document.getElementById('ss-refreshtime').innerHTML = `<span class="live-dot"></span>Live synced ${new Date().toLocaleTimeString()}`;
+      document.getElementById('gsheet-btn-label').textContent = 'Google Sheet Connected';
+      document.getElementById('btn-sync-now').style.display = 'inline-flex';
+    } catch (err) {
+      if (!isAuto) {
+        throw err;
+      }
+    }
+  }
+
+  function startGoogleSheetAutoSync(config) {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    currentSheetConfig = config;
+    localStorage.setItem('sohlene_gsheet_cfg', JSON.stringify(config));
+
+    syncGoogleSheet(false);
+
+    autoSyncInterval = setInterval(() => {
+      syncGoogleSheet(true);
+    }, 30000);
+  }
+
+  function disconnectGoogleSheet() {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    autoSyncInterval = null;
+    currentSheetConfig = null;
+    localStorage.removeItem('sohlene_gsheet_cfg');
+    document.getElementById('gsheet-btn-label').textContent = 'Connect Google Sheet';
+    document.getElementById('btn-sync-now').style.display = 'none';
+    document.getElementById('ss-refreshtime').textContent = 'Ready';
+  }
+
+  // =========================================================================
+  // EVENT LISTENERS & INITIALIZATION
+  // =========================================================================
+  // 1. Mobile Drawer Navigation Toggle
+  const sidebar = document.getElementById('app-sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  const btnHamburger = document.getElementById('btn-hamburger');
+
+  function toggleSidebar(open) {
+    sidebar.classList.toggle('open', open);
+    backdrop.classList.toggle('open', open);
+  }
+
+  btnHamburger.addEventListener('click', () => toggleSidebar(true));
+  backdrop.addEventListener('click', () => toggleSidebar(false));
+
+  // 2. Sidebar Navigation Click (Closes drawer on mobile/tablet)
+  document.querySelectorAll('#app-nav .nav-item').forEach(item => {
+    item.addEventListener('click', () => {
+      document.querySelectorAll('#app-nav .nav-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      currentTab = item.dataset.tab;
+      renderView();
+      if (window.innerWidth <= 992) {
+        toggleSidebar(false);
+      }
+    });
+  });
+
+  // 3. File Uploader Listener
+  document.getElementById('file-uploader').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+      disconnectGoogleSheet();
+      if (file.name.endsWith('.csv')) {
+        const text = await file.text();
+        const rows = parseCsvText(text);
+        setDataset(rows, file.name.replace(/\.[^/.]+$/, ''));
+      } else {
+        const buf = await file.arrayBuffer();
+        const rows = parseExcelBuffer(buf);
+        setDataset(rows, file.name.replace(/\.[^/.]+$/, ''));
+      }
+      document.getElementById('ss-refreshtime').textContent = `Loaded ${file.name}`;
+    } catch (err) {
+      alert('Error parsing uploaded file: ' + err.message);
+    }
+  });
+
+  // 4. Google Sheet Modal Wiring
+  const modal = document.getElementById('gsheet-modal');
+  const urlInput = document.getElementById('gsheet-url-input');
+  const statusBox = document.getElementById('gsheet-status');
+  const btnDisconnect = document.getElementById('btn-modal-disconnect');
+  const btnSave = document.getElementById('btn-modal-save');
+
+  document.getElementById('btn-open-gsheet').addEventListener('click', () => {
+    modal.classList.add('open');
+    statusBox.textContent = '';
+    urlInput.value = currentSheetConfig ? currentSheetConfig.rawUrl : '';
+    btnDisconnect.style.display = currentSheetConfig ? 'inline-block' : 'none';
+  });
+
+  document.getElementById('btn-modal-cancel').addEventListener('click', () => {
+    modal.classList.remove('open');
+  });
+
+  btnSave.addEventListener('click', async () => {
+    const raw = urlInput.value.trim();
+    const cfg = parseGoogleSheetUrl(raw);
+
+    if (!cfg) {
+      statusBox.style.color = 'var(--down)';
+      statusBox.textContent = 'Please enter a valid Google Sheets URL.';
+      return;
+    }
+
+    statusBox.style.color = 'var(--primary)';
+    statusBox.textContent = 'Connecting and verifying Google Sheet...';
+    btnSave.disabled = true;
+
+    try {
+      const rows = await loadGoogleSheetData(cfg);
+      if (!rows || !rows.length) throw new Error('Sheet contains no data rows.');
+
+      startGoogleSheetAutoSync(cfg);
+      statusBox.style.color = 'var(--up)';
+      statusBox.textContent = 'Successfully connected!';
+
+      setTimeout(() => {
+        modal.classList.remove('open');
+        btnSave.disabled = false;
+      }, 700);
+    } catch (err) {
+      btnSave.disabled = false;
+      statusBox.style.color = 'var(--down)';
+      statusBox.innerHTML = `Could not connect: ${err.message}<br><br>
+        <strong>Alternative:</strong> In your Google Sheet, click <em>File &gt; Share &gt; Publish to web</em>, choose <em>Comma-separated values (.csv)</em>, click <em>Publish</em>, and paste that link here.`;
+    }
+  });
+
+  btnDisconnect.addEventListener('click', () => {
+    disconnectGoogleSheet();
+    modal.classList.remove('open');
+    setDataset(STOCK_INITIAL, 'Sohlene');
+  });
+
+  document.getElementById('btn-sync-now').addEventListener('click', async () => {
+    if (currentSheetConfig) {
+      document.getElementById('ss-refreshtime').textContent = 'Syncing...';
+      await syncGoogleSheet(false);
+    }
+  });
+
+  // Check for saved Google Sheet connection in localStorage
+  const savedCfg = localStorage.getItem('sohlene_gsheet_cfg');
+  if (savedCfg) {
+    try {
+      const parsed = JSON.parse(savedCfg);
+      startGoogleSheetAutoSync(parsed);
+    } catch (e) {
+      setDataset(STOCK_INITIAL, 'Sohlene');
+    }
+  } else {
+    setDataset(STOCK_INITIAL, 'Sohlene');
+  }
+})();
+</script>
+</body>
+</html>
