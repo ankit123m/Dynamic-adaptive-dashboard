@@ -215,7 +215,7 @@
   .axis-map .field select{ font-size:12.5px; }
 
   /* ---------- Main ---------- */
-  main{ padding:28px 36px 72px; max-width:1240px; margin:0 auto; }
+  main{ padding:28px 36px 72px; max-width:1600px; }
   @media (max-width: 640px){ main{ padding:20px 16px 44px; } }
   @media (max-width: 420px){ main{ padding:16px 12px 36px; } }
 
@@ -238,6 +238,23 @@
   @media (max-width: 480px){
     .topbar h2{ font-size:20px; }
     .btn-fill, .btn-outline{ padding:9px 13px; font-size:12.5px; }
+  }
+
+  .download-wrap{ position:relative; flex-shrink:0; }
+  .download-menu{
+    position:absolute; top:calc(100% + 8px); right:0;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow-pop); padding:6px; min-width:190px; z-index:40;
+  }
+  .download-item{
+    display:flex; align-items:center; gap:9px; width:100%; text-align:left;
+    background:transparent; border:none; border-radius:8px; padding:9px 10px;
+    font-size:12.5px; font-weight:500; color:var(--ink); cursor:pointer;
+  }
+  .download-item:hover{ background:var(--primary-soft); color:var(--primary); }
+  .download-item svg{ width:15px; height:15px; flex-shrink:0; }
+  @media (max-width: 480px){
+    .download-menu{ right:0; left:auto; min-width:170px; }
   }
 
   .badge-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:12px 0 0; }
@@ -544,6 +561,26 @@
       </div>
       <div class="topbar-right">
         <div class="meta-text" id="subtitle">Charts, stats and the table below regenerate every time you load a new source.</div>
+        <div class="download-wrap">
+          <button class="btn-outline" id="downloadBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+            Download
+          </button>
+          <div class="download-menu hidden" id="downloadMenu">
+            <button class="download-item" id="downloadChartsBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l5-5 4 4 5-6 4 5"/></svg>
+              All charts (PNG)
+            </button>
+            <button class="download-item" id="downloadCsvBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6"/></svg>
+              Raw data (CSV)
+            </button>
+            <button class="download-item" id="downloadXlsxBtn" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6"/></svg>
+              Raw data (Excel)
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -878,6 +915,83 @@ function initApp(){
 
   function getViewDataset(ds){
     return { id:ds.id, name:ds.name, columns:ds.columns, types:ds.types, rows:getFilteredRows(ds) };
+  }
+
+  // ---------- Downloads (charts as PNG, data as CSV/Excel) ----------
+  function safeFileBase(){
+    const ds = currentDataset();
+    const name = ds ? ds.name : 'dashboard';
+    return name.replace(/[^a-z0-9\-_ ]/gi, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'dashboard';
+  }
+
+  function triggerBlobDownload(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function exportViewRowsAsObjects(){
+    const ds = currentDataset();
+    if(!ds) return null;
+    const view = getViewDataset(ds);
+    const objRows = view.rows.map(r => {
+      const obj = {};
+      view.columns.forEach(c => { obj[c] = (r[c] !== null && r[c] !== undefined) ? r[c] : ''; });
+      return obj;
+    });
+    return { name: view.name, columns: view.columns, objRows: objRows };
+  }
+
+  function downloadCsv(){
+    const data = exportViewRowsAsObjects();
+    if(!data || !data.objRows.length) return;
+    const csv = Papa.unparse({ fields: data.columns, data: data.objRows.map(r => data.columns.map(c => r[c])) });
+    triggerBlobDownload(new Blob([csv], { type:'text/csv;charset=utf-8;' }), safeFileBase() + '.csv');
+  }
+
+  function downloadXlsx(){
+    const data = exportViewRowsAsObjects();
+    if(!data || !data.objRows.length) return;
+    const ws = XLSX.utils.json_to_sheet(data.objRows, { header: data.columns });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    XLSX.writeFile(wb, safeFileBase() + '.xlsx');
+  }
+
+  function downloadChartsPng(){
+    const defs = [
+      { key:'bar', canvas: $('barChart'), title: $('barTitle').textContent },
+      { key:'pie', canvas: $('pieChart'), title: $('pieTitle').textContent },
+      { key:'line', canvas: $('lineChart'), title: $('lineTitle').textContent },
+      { key:'scatter', canvas: $('scatterChart'), title: $('scatterTitle').textContent }
+    ].filter(c => charts[c.key] && !c.canvas.classList.contains('hidden') && c.canvas.width > 0);
+    if(!defs.length) return;
+
+    const cols = defs.length > 1 ? 2 : 1;
+    const rows = Math.ceil(defs.length / cols);
+    const cellW = 720, cellH = 440, pad = 28, titleH = 40;
+    const out = document.createElement('canvas');
+    out.width = cols * cellW + pad * (cols + 1);
+    out.height = rows * (cellH + titleH) + pad * (rows + 1);
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.font = '700 20px Inter, sans-serif';
+    ctx.fillStyle = '#181A2A';
+    defs.forEach((c, i) => {
+      const col = i % cols, row = Math.floor(i / cols);
+      const x = pad + col * (cellW + pad);
+      const y = pad + row * (cellH + titleH + pad);
+      ctx.fillText(c.title, x, y + 24);
+      ctx.drawImage(c.canvas, x, y + titleH, cellW, cellH);
+    });
+    out.toBlob(blob => {
+      if(blob) triggerBlobDownload(blob, safeFileBase() + '-charts.png');
+    }, 'image/png');
   }
 
   function seriesColor(i, total){
@@ -2191,6 +2305,22 @@ function initApp(){
     closeDateModal();
     renderAll();
   });
+
+  // ---------- Download menu wiring ----------
+  $('downloadBtn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    $('downloadMenu').classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    const menu = $('downloadMenu');
+    if(!menu.classList.contains('hidden') && !menu.contains(e.target) && e.target.id !== 'downloadBtn' && !e.target.closest('#downloadBtn')){
+      menu.classList.add('hidden');
+    }
+  });
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape') $('downloadMenu').classList.add('hidden'); });
+  $('downloadChartsBtn').addEventListener('click', () => { downloadChartsPng(); $('downloadMenu').classList.add('hidden'); });
+  $('downloadCsvBtn').addEventListener('click', () => { downloadCsv(); $('downloadMenu').classList.add('hidden'); });
+  $('downloadXlsxBtn').addEventListener('click', () => { downloadXlsx(); $('downloadMenu').classList.add('hidden'); });
 
   // ---------- Seed with sample data ----------
   function seedSampleData(){
