@@ -807,21 +807,101 @@ function initApp(){
   }
   function escapeAttr(str){ return escapeHtml(str); }
 
+  function parseMessyNumber(v){
+    // Handles plain numbers as-is; for text, strips common noise
+    // (currency symbols, thousands separators, percent signs, stray
+    // spaces) and understands accounting-style negatives like "(123.45)".
+    if(typeof v === 'number') return isNaN(v) ? null : v;
+    if(v === null || v === undefined) return null;
+    let s = String(v).trim();
+    if(s === '') return null;
+    let negative = false;
+    const acc = /^\((.*)\)$/.exec(s);
+    if(acc){ negative = true; s = acc[1]; }
+    if(/^-/.test(s)){ negative = true; s = s.slice(1); }
+    s = s.replace(/[$€£¥₹,\s%]/g, '');
+    if(s === '' || s === '-' || s === '+' || s === '.') return null;
+    const n = Number(s);
+    if(isNaN(n)) return null;
+    return negative ? -Math.abs(n) : n;
+  }
+
+  function parseMessyDate(v){
+    if(v === null || v === undefined || v === '') return null;
+    if(v instanceof Date) return isNaN(v.getTime()) ? null : v;
+    if(typeof v === 'number') return null; // bare numbers are numeric data, not dates
+    let s = String(v).trim();
+    if(s === '') return null;
+    s = s.replace(/(\d+)(st|nd|rd|th)\b/gi, '$1'); // "5th Jan 2026" -> "5 Jan 2026"
+
+    let d = new Date(s);
+    if(!isNaN(d.getTime())) return d;
+
+    // D/M/Y, D-M-Y, D.M.Y — try to resolve day-first vs month-first using
+    // whichever component can't possibly be a month (>12).
+    let m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(s);
+    if(m){
+      let a = +m[1], b = +m[2], year = +m[3];
+      if(year < 100) year += (year < 50 ? 2000 : 1900);
+      let day = a, month = b;
+      if(month > 12 && day <= 12){ day = b; month = a; }
+      d = new Date(year, month - 1, day);
+      if(!isNaN(d.getTime()) && d.getMonth() === month - 1) return d;
+    }
+
+    // Y/M/D or Y.M.D
+    m = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(s);
+    if(m){
+      d = new Date(+m[1], +m[2] - 1, +m[3]);
+      if(!isNaN(d.getTime())) return d;
+    }
+
+    return null;
+  }
+
   function detectType(values){
     let numCount=0, dateCount=0, total=0;
     for(const v of values){
       if(v===null || v===undefined || v==='') continue;
       total++;
-      if(typeof v === 'number' && !isNaN(v)) { numCount++; continue; }
-      const n = Number(v);
-      if(v !== '' && !isNaN(n)) { numCount++; continue; }
-      const d = Date.parse(v);
-      if(!isNaN(d) && isNaN(n)) { dateCount++; continue; }
+      if(parseMessyNumber(v) !== null){ numCount++; continue; }
+      if(parseMessyDate(v) !== null){ dateCount++; continue; }
     }
     if(total===0) return 'text';
     if(numCount/total > 0.7) return 'numeric';
     if(dateCount/total > 0.6) return 'date';
     return 'text';
+  }
+
+  function cleanDataset(ds){
+    const changedCols = new Set();
+    let changedCount = 0;
+    ds.rows.forEach(row => {
+      ds.columns.forEach(col => {
+        const type = ds.types[col];
+        const raw = row[col];
+        if(raw === null || raw === undefined || raw === '') return;
+        if(type === 'numeric'){
+          const n = parseMessyNumber(raw);
+          if(n === null){ row[col] = ''; changedCount++; changedCols.add(col); }
+          else if(n !== raw){ row[col] = n; changedCount++; changedCols.add(col); }
+        } else if(type === 'date'){
+          const d = parseMessyDate(raw);
+          if(!d){ row[col] = ''; changedCount++; changedCols.add(col); }
+          else {
+            const iso = formatDateISO(d);
+            if(iso !== raw){ row[col] = iso; changedCount++; changedCols.add(col); }
+          }
+        } else if(typeof raw === 'string'){
+          const trimmed = raw.trim();
+          if(trimmed !== raw){ row[col] = trimmed; changedCount++; changedCols.add(col); }
+        }
+      });
+    });
+    const before = ds.rows.length;
+    ds.rows = ds.rows.filter(row => ds.columns.some(col => row[col] !== '' && row[col] !== null && row[col] !== undefined));
+    const droppedRows = before - ds.rows.length;
+    return { changedCount, changedCols: Array.from(changedCols), droppedRows };
   }
 
   function buildDatasetFromRows(name, rows){
@@ -831,14 +911,14 @@ function initApp(){
       const vals = rows.map(r => r[col]);
       types[col] = detectType(vals);
     });
-    return { id: uid(), name, rows, columns, types };
+    const ds = { id: uid(), name, rows, columns, types };
+    ds.cleanReport = cleanDataset(ds);
+    return ds;
   }
 
   function toNumber(v){
-    if(typeof v === 'number') return v;
-    if(v===null||v===undefined||v==='') return NaN;
-    const n = Number(String(v).replace(/,/g,''));
-    return n;
+    const n = parseMessyNumber(v);
+    return n === null ? NaN : n;
   }
 
   function median(arr){
@@ -1321,7 +1401,20 @@ function initApp(){
     }
     state.datasets = [ds];
     state.activeId = ds.id;
-    setStatus('Loaded "' + ds.name + '" — ' + ds.rows.length + ' rows, ' + ds.columns.length + ' columns.', 'ok');
+    let msg = 'Loaded "' + ds.name + '" — ' + ds.rows.length + ' rows, ' + ds.columns.length + ' columns.';
+    const report = ds.cleanReport;
+    if(report && (report.changedCount > 0 || report.droppedRows > 0)){
+      const parts = [];
+      if(report.changedCount > 0){
+        parts.push('cleaned ' + report.changedCount.toLocaleString() + ' messy value' + (report.changedCount === 1 ? '' : 's') +
+          (report.changedCols.length ? ' in ' + columnListLabel(report.changedCols) : ''));
+      }
+      if(report.droppedRows > 0){
+        parts.push('removed ' + report.droppedRows.toLocaleString() + ' empty row' + (report.droppedRows === 1 ? '' : 's'));
+      }
+      msg += ' Auto-' + parts.join(', ') + '.';
+    }
+    setStatus(msg, 'ok');
     renderDatasetList();
     activateDataset(ds.id);
   }
@@ -2008,10 +2101,16 @@ function initApp(){
     const cfg = state.charts.bar;
     const entries = aggregateGroupsMulti(ds.rows, cfg.xCol, cfg.yCols, cfg.metric);
     const primaryCol = cfg.yCols[0];
-    entries.sort((a,b) => {
-      const av = a.values[primaryCol], bv = b.values[primaryCol];
-      return cfg.sort === 'asc' ? av - bv : bv - av;
-    });
+    const isDateX = ds.types[cfg.xCol] === 'date';
+    if(isDateX){
+      // Date categories: always newest-first, regardless of the value sort setting.
+      entries.sort((a,b) => new Date(b.key) - new Date(a.key));
+    } else {
+      entries.sort((a,b) => {
+        const av = a.values[primaryCol], bv = b.values[primaryCol];
+        return cfg.sort === 'asc' ? av - bv : bv - av;
+      });
+    }
     const top = entries.slice(0, cfg.topN || 10);
     $('barTitle').textContent = metricLabel(cfg.metric) + ' of ' + columnListLabel(cfg.yCols) + ' by ' + cfg.xCol;
     destroyChart('bar');
@@ -2041,7 +2140,12 @@ function initApp(){
     if(cfg.yCols.length <= 1){
       const col = cfg.yCols[0];
       const entries = aggregateGroups(ds.rows, cfg.xCol, col, cfg.metric);
-      entries.sort((a,b) => b[1]-a[1]);
+      const isDateX = ds.types[cfg.xCol] === 'date';
+      if(isDateX){
+        entries.sort((a,b) => new Date(b[0]) - new Date(a[0]));
+      } else {
+        entries.sort((a,b) => b[1]-a[1]);
+      }
       const topN = cfg.topN || 6;
       const top = entries.slice(0, topN);
       const rest = entries.slice(topN).reduce((s,e) => s+e[1], 0);
@@ -2069,14 +2173,14 @@ function initApp(){
     if(cfg.metric === 'raw'){
       const isDateX = ds.types[cfg.xCol] === 'date';
       let rows = ds.rows;
-      if(isDateX) rows = rows.slice().sort((a,b) => new Date(a[cfg.xCol]) - new Date(b[cfg.xCol]));
+      if(isDateX) rows = rows.slice().sort((a,b) => new Date(b[cfg.xCol]) - new Date(a[cfg.xCol]));
       labels = rows.map((r,i) => String(r[cfg.xCol] != null ? r[cfg.xCol] : i+1));
       seriesData = cfg.yCols.map(col => rows.map(r => { const v = toNumber(r[col]); return isNaN(v) ? null : v; }));
     } else {
       const entries = aggregateGroupsMulti(ds.rows, cfg.xCol, cfg.yCols, cfg.metric);
       let ordered = entries;
       if(ds.types[cfg.xCol] === 'date'){
-        ordered = entries.slice().sort((a,b) => new Date(a.key) - new Date(b.key));
+        ordered = entries.slice().sort((a,b) => new Date(b.key) - new Date(a.key));
       }
       labels = ordered.map(e => e.key);
       seriesData = cfg.yCols.map(col => ordered.map(e => e.values[col]));
