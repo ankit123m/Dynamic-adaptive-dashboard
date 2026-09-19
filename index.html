@@ -313,10 +313,21 @@
     background:var(--panel); border:1px solid var(--line); border-radius:var(--radius-lg);
     box-shadow:var(--shadow-card);
     padding:18px 40px 18px 18px; position:relative; cursor:pointer; min-width:0;
-    transition:box-shadow .15s ease, transform .15s ease;
+    transition:box-shadow .15s ease, transform .15s ease, border-color .15s ease, background .15s ease;
   }
   .stat-cell:hover{ box-shadow:var(--shadow-pop); transform:translateY(-1px); }
   .stat-cell:hover .card-config-btn{ border-color:var(--primary); color:var(--primary); }
+  .stat-cell.alert{
+    border-color:var(--danger);
+    background:color-mix(in srgb, var(--danger) 6%, var(--panel));
+    box-shadow:0 1px 2px rgba(220,38,38,0.08), 0 4px 14px rgba(220,38,38,0.12);
+  }
+  .stat-cell.alert .value{ color:var(--danger); }
+  .stat-cell.alert .kpi-icon{ background:color-mix(in srgb, var(--danger) 16%, var(--panel)); color:var(--danger); }
+  .alert-note{
+    margin-top:8px; font-size:11px; font-weight:700; color:var(--danger);
+    display:inline-flex; align-items:center; gap:4px;
+  }
   .kpi-icon{
     width:34px; height:34px; border-radius:9px;
     background:var(--primary-soft); color:var(--primary);
@@ -327,6 +338,16 @@
   .stat-cell .value{ font-size:24px; font-weight:800; color:var(--ink); line-height:1.15; overflow-wrap:break-word; }
   .stat-cell .label{ font-size:12px; color:var(--muted); margin-top:5px; font-weight:500; overflow-wrap:break-word; }
   @media (max-width: 480px){ .stat-cell .value{ font-size:20px; } }
+
+  .threshold-field{ border-top:1px solid var(--line); padding-top:12px; margin-top:2px; }
+  .threshold-toggle{
+    display:flex; align-items:flex-start; gap:8px; font-size:12.5px; color:var(--ink);
+    cursor:pointer; font-weight:500; line-height:1.4;
+  }
+  .threshold-toggle input{ width:auto; margin-top:2px; flex-shrink:0; cursor:pointer; accent-color:var(--primary); }
+  .threshold-sub{ display:flex; gap:8px; margin-top:10px; }
+  .threshold-sub select{ flex:1; }
+  .threshold-sub input[type=number]{ flex:1; }
 
   .card-config-btn{
     position:absolute; top:14px; right:14px;
@@ -1551,10 +1572,10 @@ function initApp(){
     const y2Col = numericCols[1] || numericCols[0] || ds.columns[0];
     return {
       kpis: [
-        { metric:'count', columns:[] },
-        { metric:'sum', columns:[yCol] },
-        { metric:'average', columns:[yCol] },
-        { metric:'max', columns:[yCol] }
+        { metric:'count', columns:[], threshold:null },
+        { metric:'sum', columns:[yCol], threshold:null },
+        { metric:'average', columns:[yCol], threshold:null },
+        { metric:'max', columns:[yCol], threshold:null }
       ],
       charts: {
         bar: { xCol:xCol, yCols:[yCol], metric:'sum', topN:10, sort:'desc' },
@@ -1788,6 +1809,55 @@ function initApp(){
     return fieldWrap(labelText, input);
   }
 
+  function buildThresholdField(idPrefix, threshold){
+    const wrap = document.createElement('div');
+    wrap.className = 'field threshold-field';
+
+    const toggleRow = document.createElement('label');
+    toggleRow.className = 'threshold-toggle';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.id = idPrefix + 'Enabled';
+    cb.checked = !!(threshold && threshold.enabled);
+    const span = document.createElement('span');
+    span.textContent = 'Flag this KPI red when it crosses a value';
+    toggleRow.appendChild(cb); toggleRow.appendChild(span);
+    wrap.appendChild(toggleRow);
+
+    const sub = document.createElement('div');
+    sub.className = 'threshold-sub';
+    sub.id = idPrefix + 'Sub';
+    sub.classList.toggle('hidden', !cb.checked);
+
+    const dirSel = document.createElement('select');
+    dirSel.id = idPrefix + 'Direction';
+    ['below','above'].forEach(d => {
+      const o = document.createElement('option');
+      o.value = d; o.textContent = d === 'below' ? 'Falls below' : 'Rises above';
+      if(threshold && threshold.direction === d) o.selected = true;
+      dirSel.appendChild(o);
+    });
+
+    const valInput = document.createElement('input');
+    valInput.type = 'number'; valInput.id = idPrefix + 'Value';
+    valInput.placeholder = 'Value';
+    if(threshold && threshold.value !== null && threshold.value !== undefined) valInput.value = threshold.value;
+
+    sub.appendChild(dirSel);
+    sub.appendChild(valInput);
+    wrap.appendChild(sub);
+
+    cb.addEventListener('change', () => { sub.classList.toggle('hidden', !cb.checked); });
+    return wrap;
+  }
+
+  function readThresholdField(idPrefix){
+    const cb = document.getElementById(idPrefix + 'Enabled');
+    if(!cb || !cb.checked) return null;
+    const value = parseFloat(document.getElementById(idPrefix + 'Value').value);
+    if(isNaN(value)) return null;
+    return { enabled:true, direction: document.getElementById(idPrefix + 'Direction').value, value:value };
+  }
+
   function replaceField(id, newFieldWrap){
     const old = document.getElementById(id);
     if(old) old.closest('.field').replaceWith(newFieldWrap);
@@ -1804,6 +1874,7 @@ function initApp(){
       $('modalTitle').textContent = 'Configure KPI';
       body.appendChild(buildMetricField('kpiMetric', METRICS, kpi.metric));
       body.appendChild(buildColumnChecklistField('kpiColumn', ds, kpi.columns, kpi.metric, true, 'Column(s)'));
+      body.appendChild(buildThresholdField('kpiThreshold', kpi.threshold));
       $('kpiMetric').addEventListener('change', () => {
         const newMetric = $('kpiMetric').value;
         replaceField('kpiColumn', buildColumnChecklistField('kpiColumn', ds, readColumnChecklist('kpiColumn'), newMetric, true, 'Column(s)'));
@@ -2009,7 +2080,8 @@ function initApp(){
     if(modalTarget.type === 'kpi'){
       state.kpis[modalTarget.index] = {
         metric: $('kpiMetric').value,
-        columns: readColumnChecklist('kpiColumn')
+        columns: readColumnChecklist('kpiColumn'),
+        threshold: readThresholdField('kpiThreshold')
       };
     } else if(modalTarget.type === 'chart'){
       const key = modalTarget.key;
@@ -2061,6 +2133,11 @@ function initApp(){
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
   }
 
+  function checkThresholdBreached(value, threshold){
+    if(!threshold || !threshold.enabled || threshold.value === null || threshold.value === undefined || isNaN(value)) return false;
+    return threshold.direction === 'below' ? value < threshold.value : value > threshold.value;
+  }
+
   function renderStats(ds){
     const strip = $('statStrip');
     strip.innerHTML = '';
@@ -2069,13 +2146,18 @@ function initApp(){
       const cols = kpi.columns || [];
       const colLabel = cols.length ? columnListLabel(cols) : (kpi.metric === 'count' ? 'all rows' : '');
       const label = metricLabel(kpi.metric) + (colLabel ? ' — ' + colLabel : '');
+      const breached = checkThresholdBreached(value, kpi.threshold);
       const cell = document.createElement('div');
-      cell.className = 'stat-cell';
+      cell.className = 'stat-cell' + (breached ? ' alert' : '');
+      const alertNote = breached
+        ? '<div class="alert-note">⚠ ' + (kpi.threshold.direction === 'below' ? 'Below ' : 'Above ') + formatMetricValue(kpi.threshold.value, kpi.metric) + '</div>'
+        : '';
       cell.innerHTML =
         '<div class="kpi-icon">' + kpiIconSvg(kpi.metric) + '</div>' +
         '<button class="card-config-btn" aria-label="Configure KPI">⚙</button>' +
         '<div class="value">' + formatMetricValue(value, kpi.metric) + '</div>' +
-        '<div class="label">' + escapeHtml(label) + '</div>';
+        '<div class="label">' + escapeHtml(label) + '</div>' +
+        alertNote;
       cell.addEventListener('click', () => openModal({ type:'kpi', index:i }));
       strip.appendChild(cell);
     });
