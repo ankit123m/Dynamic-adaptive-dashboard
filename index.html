@@ -350,13 +350,15 @@
   .threshold-sub input[type=number]{ flex:1; }
 
   .card-config-btn{
-    position:absolute; top:14px; right:14px;
     width:26px; height:26px; border-radius:8px;
     background:#F5F5F9; border:1px solid transparent;
     color:var(--muted-soft); font-size:12px;
     display:flex; align-items:center; justify-content:center; padding:0;
   }
   .card-config-btn:hover{ border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
+  /* On KPI cards there's no sibling button to sit next to, so the gear
+     floats fixed to the corner instead of taking up flow space. */
+  .stat-cell .card-config-btn{ position:absolute; top:14px; right:14px; }
 
   /* ---------- Chart grid ---------- */
   .chart-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px; }
@@ -373,8 +375,29 @@
   .chart-card h3{ font-size:14px; margin:0; font-weight:700; overflow:hidden; text-overflow:ellipsis; }
   .chart-card .ch-meta{ font-size:10px; color:var(--muted-soft); font-weight:700; letter-spacing:0.05em; margin-top:3px; display:block; }
   .chart-card .ch-controls{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
-  .chart-wrap{ height:260px; position:relative; max-width:100%; }
+  .chart-wrap{ height:260px; position:relative; max-width:100%; cursor:pointer; border-radius:10px; }
   .chart-wrap canvas{ max-width:100% !important; }
+  .chart-wrap .expand-hint{
+    position:absolute; top:6px; right:6px; z-index:5;
+    display:flex; align-items:center; gap:5px;
+    background:rgba(24,26,42,0.82); color:#fff;
+    font-size:10.5px; font-weight:600; letter-spacing:0.01em;
+    padding:5px 9px; border-radius:999px;
+    opacity:0; transform:translateY(-2px);
+    transition:opacity .12s ease, transform .12s ease;
+    pointer-events:none;
+  }
+  .chart-wrap .expand-hint svg{ width:11px; height:11px; flex-shrink:0; }
+  .chart-wrap:hover .expand-hint{ opacity:1; transform:translateY(0); }
+  .chart-wrap:hover canvas{ filter:brightness(0.98); }
+  .card-expand-btn{
+    width:26px; height:26px; border-radius:8px;
+    background:#F5F5F9; border:1px solid transparent;
+    color:var(--muted-soft);
+    display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .card-expand-btn svg{ width:14px; height:14px; }
+  .card-expand-btn:hover{ border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
   @media (max-width: 640px){
     .chart-card{ padding:16px 14px 10px; }
     .chart-wrap{ height:220px; }
@@ -430,6 +453,21 @@
   .modal-foot{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:16px 20px; border-top:1px solid var(--line); }
   .modal-foot .btn-primary{ width:auto; padding:9px 18px; background:var(--primary); border-color:var(--primary); }
   .modal-foot .btn-primary:hover{ background:var(--primary-dark); }
+
+  /* ---------- Chart "full sheet" overlay ---------- */
+  .sheet-panel{ max-width:1100px; }
+  .sheet-head-text{ min-width:0; }
+  .sheet-head-text .meta{ font-size:12px; color:var(--muted); margin-top:2px; }
+  .sheet-head-actions{ display:flex; align-items:center; gap:8px; flex-shrink:0; }
+  .sheet-modal-body{ padding:20px; }
+  .sheet-summary{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; }
+  .sheet-summary-cell{ flex:1 1 160px; background:#FAFAFC; border:1px solid var(--line); border-radius:10px; padding:11px 14px; }
+  .sheet-summary-cell .label{ font-size:10.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted-soft); margin-bottom:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sheet-summary-cell .stats{ font-size:12.5px; color:#3D3F52; display:flex; flex-direction:column; gap:3px; }
+  .sheet-summary-cell .stats b{ font-weight:700; color:var(--ink); }
+  .sheet-summary-overview{ background:var(--primary-soft); border-color:var(--primary-soft); }
+  .sheet-chart-box{ height:340px; position:relative; margin-bottom:18px; }
+  @media (max-width: 640px){ .sheet-chart-box{ height:240px; } }
 
   .checkbox-list{ border:1px solid var(--line-strong); border-radius:var(--radius-sm); max-height:170px; overflow-y:auto; -webkit-overflow-scrolling:touch; }
   .checkbox-row{ display:flex; align-items:center; gap:9px; padding:9px 11px; font-size:12.5px; cursor:pointer; border-bottom:1px solid var(--line); }
@@ -632,9 +670,17 @@
               <h3 id="barTitle">Totals by category</h3>
               <span class="ch-meta">BAR</span>
             </div>
-            <div class="ch-controls"><button class="card-config-btn" id="barConfigBtn" aria-label="Configure bar chart">⚙</button></div>
+            <div class="ch-controls">
+              <button class="card-expand-btn" id="barExpandBtn" aria-label="Open full sheet for bar chart" title="Open full sheet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+              </button>
+              <button class="card-config-btn" id="barConfigBtn" aria-label="Configure bar chart">⚙</button>
+            </div>
           </div>
-          <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+          <div class="chart-wrap" id="barChartWrap">
+            <canvas id="barChart"></canvas>
+            <span class="expand-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>Open full sheet</span>
+          </div>
         </div>
         <div class="chart-card">
           <div class="ch-head" id="pieHead">
@@ -642,9 +688,17 @@
               <h3 id="pieTitle">Share of total</h3>
               <span class="ch-meta">DISTRIBUTION</span>
             </div>
-            <div class="ch-controls"><button class="card-config-btn" id="pieConfigBtn" aria-label="Configure distribution chart">⚙</button></div>
+            <div class="ch-controls">
+              <button class="card-expand-btn" id="pieExpandBtn" aria-label="Open full sheet for distribution chart" title="Open full sheet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+              </button>
+              <button class="card-config-btn" id="pieConfigBtn" aria-label="Configure distribution chart">⚙</button>
+            </div>
           </div>
-          <div class="chart-wrap"><canvas id="pieChart"></canvas></div>
+          <div class="chart-wrap" id="pieChartWrap">
+            <canvas id="pieChart"></canvas>
+            <span class="expand-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>Open full sheet</span>
+          </div>
         </div>
         <div class="chart-card">
           <div class="ch-head" id="lineHead">
@@ -652,9 +706,17 @@
               <h3 id="lineTitle">Trend across records</h3>
               <span class="ch-meta">LINE</span>
             </div>
-            <div class="ch-controls"><button class="card-config-btn" id="lineConfigBtn" aria-label="Configure trend chart">⚙</button></div>
+            <div class="ch-controls">
+              <button class="card-expand-btn" id="lineExpandBtn" aria-label="Open full sheet for trend chart" title="Open full sheet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+              </button>
+              <button class="card-config-btn" id="lineConfigBtn" aria-label="Configure trend chart">⚙</button>
+            </div>
           </div>
-          <div class="chart-wrap"><canvas id="lineChart"></canvas></div>
+          <div class="chart-wrap" id="lineChartWrap">
+            <canvas id="lineChart"></canvas>
+            <span class="expand-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>Open full sheet</span>
+          </div>
         </div>
         <div class="chart-card" id="scatterCard">
           <div class="ch-head" id="scatterHead">
@@ -662,9 +724,18 @@
               <h3 id="scatterTitle">Correlation</h3>
               <span class="ch-meta">SCATTER</span>
             </div>
-            <div class="ch-controls"><button class="card-config-btn" id="scatterConfigBtn" aria-label="Configure scatter chart">⚙</button></div>
+            <div class="ch-controls">
+              <button class="card-expand-btn" id="scatterExpandBtn" aria-label="Open full sheet for scatter chart" title="Open full sheet">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+              </button>
+              <button class="card-config-btn" id="scatterConfigBtn" aria-label="Configure scatter chart">⚙</button>
+            </div>
           </div>
-          <div class="chart-wrap"><canvas id="scatterChart"></canvas><div class="chart-empty hidden" id="scatterEmpty">Pick two numeric columns with matching data to see a correlation here.</div></div>
+          <div class="chart-wrap" id="scatterChartWrap">
+            <canvas id="scatterChart"></canvas>
+            <div class="chart-empty hidden" id="scatterEmpty">Pick two numeric columns with matching data to see a correlation here.</div>
+            <span class="expand-hint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>Open full sheet</span>
+          </div>
         </div>
       </div>
 
@@ -732,6 +803,41 @@
       <div class="date-modal-actions">
         <button class="btn-ghost" id="dateModalCancel" type="button">Cancel</button>
         <button class="btn-primary" id="dateModalUpdate" type="button">Update</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="sheetOverlay">
+  <div class="modal-panel sheet-panel">
+    <div class="modal-head">
+      <div class="sheet-head-text">
+        <h3 id="sheetTitle">Chart</h3>
+        <div class="meta" id="sheetMeta"></div>
+      </div>
+      <div class="sheet-head-actions">
+        <button class="btn-ghost" id="sheetCsvBtn" type="button">Download CSV</button>
+        <button class="modal-close" id="sheetClose" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div class="modal-body sheet-modal-body">
+      <div class="sheet-summary" id="sheetSummary"></div>
+      <div class="sheet-chart-box"><canvas id="sheetChart"></canvas></div>
+      <div class="table-section">
+        <div class="table-head">
+          <h3>Full data behind this chart</h3>
+          <input type="text" class="table-search" id="sheetSearch" placeholder="Filter rows…">
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr id="sheetHeadRow"></tr></thead>
+            <tbody id="sheetBodyRow"></tbody>
+          </table>
+        </div>
+        <div class="table-foot">
+          <span id="sheetRowCount">0 rows</span>
+          <span id="sheetColCount">0 columns</span>
+        </div>
       </div>
     </div>
   </div>
@@ -2339,6 +2445,265 @@ function initApp(){
     renderScatter(ds);
   }
 
+  // ---------- "Open full sheet" ----------
+  // Rebuilds a chart's data WITHOUT the dashboard's Top-N / point caps, so
+  // the standalone page shows every category or row behind it, then opens
+  // that as a self-contained HTML page in a new tab.
+  function buildFullChartPayload(key, ds){
+    const cfg = state.charts[key];
+    if(key === 'bar'){
+      if(!cfg.xCol || !cfg.yCols.length) return null;
+      const entries = aggregateGroupsMulti(ds.rows, cfg.xCol, cfg.yCols, cfg.metric);
+      const isDateX = ds.types[cfg.xCol] === 'date';
+      entries.sort((a,b) => {
+        if(isDateX) return new Date(b.key) - new Date(a.key);
+        const av = a.values[cfg.yCols[0]], bv = b.values[cfg.yCols[0]];
+        return cfg.sort === 'asc' ? av - bv : bv - av;
+      });
+      return {
+        chartType:'bar',
+        title: $('barTitle').textContent,
+        subtitle: entries.length.toLocaleString() + ' categories · grouped by ' + cfg.xCol,
+        labels: entries.map(e => e.key),
+        datasets: cfg.yCols.map((col,i) => ({ label:col, data: entries.map(e => e.values[col]), backgroundColor: seriesColor(i, cfg.yCols.length), borderRadius:2 })),
+        columns: [cfg.xCol].concat(cfg.yCols),
+        rows: entries.map(e => { const r = {}; r[cfg.xCol] = e.key; cfg.yCols.forEach(c => r[c] = e.values[c]); return r; })
+      };
+    }
+    if(key === 'pie'){
+      if(!cfg.xCol && cfg.yCols.length <= 1) return null;
+      let labels, data, columns, rows;
+      if(cfg.yCols.length <= 1){
+        const col = cfg.yCols[0];
+        const entries = aggregateGroups(ds.rows, cfg.xCol, col, cfg.metric);
+        const isDateX = ds.types[cfg.xCol] === 'date';
+        entries.sort((a,b) => isDateX ? new Date(b[0]) - new Date(a[0]) : b[1]-a[1]);
+        labels = entries.map(e => e[0]);
+        data = entries.map(e => e[1]);
+        columns = [cfg.xCol, col];
+        rows = entries.map(e => { const r = {}; r[cfg.xCol] = e[0]; r[col] = e[1]; return r; });
+      } else {
+        const totals = totalsPerColumn(ds.rows, cfg.yCols, cfg.metric);
+        labels = totals.map(e => e[0]);
+        data = totals.map(e => e[1]);
+        columns = ['Column', 'Value'];
+        rows = totals.map(e => ({ Column:e[0], Value:e[1] }));
+      }
+      return {
+        chartType:'doughnut',
+        title: $('pieTitle').textContent,
+        subtitle: labels.length.toLocaleString() + ' segments',
+        labels: labels,
+        datasets: [{ data:data, backgroundColor: CHART_COLORS.concat(['#A9A398']), borderWidth:2, borderColor:'#FFFFFF' }],
+        columns: columns,
+        rows: rows
+      };
+    }
+    if(key === 'line'){
+      if(!cfg.xCol || !cfg.yCols.length) return null;
+      const isRaw = cfg.metric === 'raw';
+      let labels, seriesData, columns, rows;
+      if(isRaw){
+        const isDateX = ds.types[cfg.xCol] === 'date';
+        let rowsSrc = ds.rows;
+        if(isDateX) rowsSrc = rowsSrc.slice().sort((a,b) => new Date(b[cfg.xCol]) - new Date(a[cfg.xCol]));
+        labels = rowsSrc.map((r,i) => String(r[cfg.xCol] != null ? r[cfg.xCol] : i+1));
+        seriesData = cfg.yCols.map(col => rowsSrc.map(r => { const v = toNumber(r[col]); return isNaN(v) ? null : v; }));
+        columns = [cfg.xCol].concat(cfg.yCols);
+        rows = rowsSrc.map(r => { const o = {}; o[cfg.xCol] = r[cfg.xCol]; cfg.yCols.forEach(c => o[c] = r[c]); return o; });
+      } else {
+        const entries = aggregateGroupsMulti(ds.rows, cfg.xCol, cfg.yCols, cfg.metric);
+        let ordered = entries;
+        if(ds.types[cfg.xCol] === 'date') ordered = entries.slice().sort((a,b) => new Date(b.key) - new Date(a.key));
+        labels = ordered.map(e => e.key);
+        seriesData = cfg.yCols.map(col => ordered.map(e => e.values[col]));
+        columns = [cfg.xCol].concat(cfg.yCols);
+        rows = ordered.map(e => { const o = {}; o[cfg.xCol] = e.key; cfg.yCols.forEach(c => o[c] = e.values[c]); return o; });
+      }
+      return {
+        chartType:'line',
+        title: $('lineTitle').textContent,
+        subtitle: rows.length.toLocaleString() + ' points',
+        labels: labels,
+        datasets: cfg.yCols.map((col,i) => ({ label:col, data: seriesData[i], borderColor: seriesColor(i, cfg.yCols.length), backgroundColor: cfg.yCols.length === 1 ? 'rgba(99,102,241,0.12)' : 'transparent', fill: cfg.yCols.length === 1, tension:0.25, pointRadius: labels.length > 60 ? 0 : 2, borderWidth:2 })),
+        columns: columns,
+        rows: rows
+      };
+    }
+    if(key === 'scatter'){
+      if(!cfg.xCol || !cfg.yCol) return null;
+      const points = ds.rows.map(r => ({ x: toNumber(r[cfg.xCol]), y: toNumber(r[cfg.yCol]) })).filter(p => !isNaN(p.x) && !isNaN(p.y));
+      if(!points.length) return null;
+      return {
+        chartType:'scatter',
+        title: $('scatterTitle').textContent,
+        subtitle: points.length.toLocaleString() + ' points',
+        labels: [],
+        datasets: [{ label: cfg.xCol + ' vs ' + cfg.yCol, data: points, backgroundColor: CHART_COLORS[3] }],
+        columns: [cfg.xCol, cfg.yCol],
+        rows: points.map(p => ({ [cfg.xCol]: p.x, [cfg.yCol]: p.y })),
+        axisX: cfg.xCol,
+        axisY: cfg.yCol
+      };
+    }
+    return null;
+  }
+
+  let sheetChart = null;
+  let sheetState = { rows:[], columns:[], search:"", sort:{ col:null, dir:1 } };
+
+  function openChartSheet(key){
+    const raw = currentDataset();
+    if(!raw){ setStatus('Load a data source first.', 'error'); return; }
+    const ds = getViewDataset(raw);
+    const payload = buildFullChartPayload(key, ds);
+    if(!payload){ setStatus('This chart needs its columns set before it can be opened.', 'error'); return; }
+
+    sheetState = { rows: payload.rows, columns: payload.columns, search:"", sort:{ col:null, dir:1 } };
+    $('sheetTitle').textContent = payload.title;
+    $('sheetMeta').textContent = raw.name + (payload.subtitle ? ' · ' + payload.subtitle : '');
+    $('sheetSearch').value = '';
+    renderSheetSummary();
+    renderSheetTable();
+    renderSheetChart(payload);
+    $('sheetOverlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeChartSheet(){
+    $('sheetOverlay').classList.add('hidden');
+    document.body.style.overflow = '';
+    if(sheetChart){ sheetChart.destroy(); sheetChart = null; }
+  }
+
+  // Quick stats strip for the full-sheet overlay: overview (row/column
+  // counts) plus, per column, sum/average/min/max for numeric columns or
+  // unique-count/most-common for category columns — computed from the
+  // complete data behind the chart (not affected by the search box).
+  function renderSheetSummary(){
+    const cols = sheetState.columns, rows = sheetState.rows;
+    const overview = '<div class="sheet-summary-cell sheet-summary-overview"><div class="label">Overview</div><div class="stats">' +
+      '<span><b>' + rows.length.toLocaleString() + '</b> rows</span>' +
+      '<span><b>' + cols.length + '</b> columns</span>' +
+      '</div></div>';
+    const cells = cols.map(c => {
+      let numCount = 0, total = 0, min = Infinity, max = -Infinity;
+      const freq = new Map();
+      rows.forEach(r => {
+        const v = r[c];
+        if(typeof v === 'number' && !isNaN(v)){
+          numCount++; total += v;
+          if(v < min) min = v;
+          if(v > max) max = v;
+        }
+        const key = v === null || v === undefined || v === '' ? '(blank)' : String(v);
+        freq.set(key, (freq.get(key) || 0) + 1);
+      });
+      const isNumeric = rows.length > 0 && numCount / rows.length > 0.6;
+      if(isNumeric){
+        const avg = numCount ? total / numCount : 0;
+        return '<div class="sheet-summary-cell"><div class="label">' + escapeHtml(c) + '</div><div class="stats">' +
+          '<span>Sum <b>' + fmtNum(total) + '</b></span>' +
+          '<span>Average <b>' + fmtNum(avg) + '</b></span>' +
+          '<span>Min <b>' + fmtNum(min === Infinity ? 0 : min) + '</b> · Max <b>' + fmtNum(max === -Infinity ? 0 : max) + '</b></span>' +
+          '</div></div>';
+      }
+      let topKey = '', topCount = 0;
+      freq.forEach((cnt, key) => { if(cnt > topCount){ topCount = cnt; topKey = key; } });
+      return '<div class="sheet-summary-cell"><div class="label">' + escapeHtml(c) + '</div><div class="stats">' +
+        '<span><b>' + freq.size.toLocaleString() + '</b> unique values</span>' +
+        (topKey ? '<span>Most common: <b>' + escapeHtml(topKey) + '</b> (' + topCount.toLocaleString() + ')</span>' : '') +
+        '</div></div>';
+    }).join('');
+    $('sheetSummary').innerHTML = overview + cells;
+  }
+
+  function renderSheetChart(payload){
+    if(sheetChart){ sheetChart.destroy(); sheetChart = null; }
+    const ctx = $('sheetChart');
+    const opts = baseChartOptions({});
+    if(payload.chartType === 'doughnut'){
+      sheetChart = new Chart(ctx, {
+        type:'doughnut',
+        data:{ labels: payload.labels, datasets: payload.datasets },
+        options: Object.assign({}, opts, { cutout:'58%' })
+      });
+    } else if(payload.chartType === 'scatter'){
+      sheetChart = new Chart(ctx, {
+        type:'scatter',
+        data:{ datasets: payload.datasets },
+        options: Object.assign({}, opts, {
+          plugins: Object.assign({}, opts.plugins, { legend:{ display:false } }),
+          scales:{
+            x:{ title:{ display:true, text:payload.axisX, font:{family:'Inter', size:11} }, ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } },
+            y:{ title:{ display:true, text:payload.axisY, font:{family:'Inter', size:11} }, ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } }
+          }
+        })
+      });
+    } else {
+      sheetChart = new Chart(ctx, {
+        type: payload.chartType,
+        data:{ labels: payload.labels, datasets: payload.datasets },
+        options: Object.assign({}, opts, {
+          plugins: Object.assign({}, opts.plugins, { legend:{ display: payload.datasets.length > 1 } }),
+          scales:{
+            x:{ ticks:{ font:{family:'Inter', size:10}, autoSkip:true, maxRotation:45 }, grid:{ display:false } },
+            y:{ ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } }
+          }
+        })
+      });
+    }
+  }
+
+  function renderSheetTable(){
+    const headRow = $('sheetHeadRow');
+    headRow.innerHTML = sheetState.columns.map(c => {
+      const arrow = sheetState.sort.col === c ? '<span class="arrow">' + (sheetState.sort.dir === 1 ? '↑' : '↓') + '</span>' : '';
+      return '<th data-col="' + escapeAttr(c) + '">' + escapeHtml(c) + arrow + '</th>';
+    }).join('');
+    headRow.querySelectorAll('th').forEach(th => {
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if(sheetState.sort.col === col) sheetState.sort.dir *= -1;
+        else sheetState.sort = { col:col, dir:1 };
+        renderSheetTable();
+      });
+    });
+
+    let rows = sheetState.rows;
+    if(sheetState.search){
+      const q = sheetState.search.toLowerCase();
+      rows = rows.filter(r => sheetState.columns.some(c => String(r[c] != null ? r[c] : '').toLowerCase().indexOf(q) !== -1));
+    }
+    if(sheetState.sort.col){
+      const col = sheetState.sort.col, dir = sheetState.sort.dir;
+      rows = rows.slice().sort((a,b) => {
+        const av = a[col], bv = b[col];
+        const an = toNumber(av), bn = toNumber(bv);
+        if(!isNaN(an) && !isNaN(bn)) return (an-bn) * dir;
+        return String(av != null ? av : '').localeCompare(String(bv != null ? bv : '')) * dir;
+      });
+    }
+
+    $('sheetBodyRow').innerHTML = rows.map(r => {
+      return '<tr>' + sheetState.columns.map(c => {
+        const v = r[c];
+        const display = typeof v === 'number' ? fmtNum(v) : escapeHtml(String(v != null ? v : ''));
+        return '<td>' + display + '</td>';
+      }).join('') + '</tr>';
+    }).join('');
+
+    $('sheetRowCount').textContent = rows.length.toLocaleString() + ' rows';
+    $('sheetColCount').textContent = sheetState.columns.length + ' columns';
+  }
+
+  function downloadSheetCsv(){
+    if(!sheetState.rows.length) return;
+    const csv = Papa.unparse({ fields: sheetState.columns, data: sheetState.rows.map(r => sheetState.columns.map(c => r[c])) });
+    triggerBlobDownload(new Blob([csv], { type:'text/csv;charset=utf-8;' }), safeFileBase() + '-chart-data.csv');
+  }
+
+
   // ---------- Rendering: table ----------
   function renderTable(ds){
     const headRow = $('tableHeadRow');
@@ -2459,12 +2824,28 @@ function initApp(){
   $('lineConfigBtn').addEventListener('click', (e) => { e.stopPropagation(); openModal({ type:'chart', key:'line' }); });
   $('scatterConfigBtn').addEventListener('click', (e) => { e.stopPropagation(); openModal({ type:'chart', key:'scatter' }); });
 
+  // ---------- "Open full sheet" — click a chart (or its expand button) to
+  // open a standalone page with the enlarged chart plus its complete data. ----------
+  $('barExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('bar'); });
+  $('pieExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('pie'); });
+  $('lineExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('line'); });
+  $('scatterExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('scatter'); });
+  $('barChartWrap').addEventListener('click', () => openChartSheet('bar'));
+  $('pieChartWrap').addEventListener('click', () => openChartSheet('pie'));
+  $('lineChartWrap').addEventListener('click', () => openChartSheet('line'));
+  $('scatterChartWrap').addEventListener('click', () => openChartSheet('scatter'));
+
+  $('sheetClose').addEventListener('click', closeChartSheet);
+  $('sheetOverlay').addEventListener('click', (e) => { if(e.target.id === 'sheetOverlay') closeChartSheet(); });
+  $('sheetSearch').addEventListener('input', (e) => { sheetState.search = e.target.value; renderSheetTable(); });
+  $('sheetCsvBtn').addEventListener('click', downloadSheetCsv);
+
   $('modalClose').addEventListener('click', closeModal);
   $('modalApply').addEventListener('click', applyModal);
   $('modalReset').addEventListener('click', resetModalTarget);
   $('modalOverlay').addEventListener('click', (e) => { if(e.target.id === 'modalOverlay') closeModal(); });
   document.addEventListener('keydown', (e) => {
-    if(e.key === 'Escape'){ closeModal(); closeDateModal(); }
+    if(e.key === 'Escape'){ closeModal(); closeDateModal(); closeChartSheet(); }
   });
 
   // ---------- Date-range filter wiring ----------
