@@ -240,6 +240,17 @@
     .btn-fill, .btn-outline{ padding:9px 13px; font-size:12.5px; }
   }
 
+  .share-wrap{ position:relative; flex-shrink:0; }
+  .share-toast{
+    position:absolute; top:calc(100% + 8px); right:0;
+    background:var(--ink); color:#fff; font-size:12px; font-weight:600;
+    padding:8px 12px; border-radius:var(--radius-sm); white-space:nowrap;
+    box-shadow:var(--shadow-pop); z-index:41;
+    opacity:0; transform:translateY(-4px); pointer-events:none;
+    transition:opacity .15s ease, transform .15s ease;
+  }
+  .share-toast.show{ opacity:1; transform:translateY(0); }
+
   .download-wrap{ position:relative; flex-shrink:0; }
   .download-menu{
     position:absolute; top:calc(100% + 8px); right:0;
@@ -620,6 +631,13 @@
       </div>
       <div class="topbar-right">
         <div class="meta-text" id="subtitle">Charts, stats and the table below regenerate every time you load a new source.</div>
+        <div class="share-wrap">
+          <button class="btn-outline" id="shareBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.8M8.6 13.4l6.8 3.8"/></svg>
+            Share
+          </button>
+          <div class="share-toast" id="shareToast">Link copied!</div>
+        </div>
         <div class="download-wrap">
           <button class="btn-outline" id="downloadBtn" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
@@ -882,6 +900,13 @@ Promise.all([
 
 function initApp(){
   "use strict";
+
+  // ---------- Share link ----------
+  // Replace this with the public URL where this HTML file is hosted
+  // (e.g. a GitHub Pages link like https://yourusername.github.io/your-repo/dashboard.html).
+  // Anyone who opens that link gets this same empty dashboard in their own browser,
+  // loads their own file/sheet, and nothing is shared back to you.
+  const SHARE_URL = 'https://ankit123m.github.io/Dynamic-adaptive-dashboard/dashboard.html';
 
   // ---------- Metric definitions ----------
   const METRICS = {
@@ -2871,6 +2896,32 @@ function initApp(){
     }
     closeDateModal();
     renderAll();
+  });
+
+  // ---------- Share button wiring ----------
+  $('shareBtn').addEventListener('click', () => {
+    const showToast = () => {
+      const toast = $('shareToast');
+      toast.classList.add('show');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => toast.classList.remove('show'), 2200);
+    };
+    const fallbackCopy = () => {
+      const ta = document.createElement('textarea');
+      ta.value = SHARE_URL;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch(err) { /* ignore */ }
+      document.body.removeChild(ta);
+      showToast();
+    };
+    if(navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(SHARE_URL).then(showToast, fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
   });
 
   // ---------- Download menu wiring ----------
