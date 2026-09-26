@@ -149,6 +149,7 @@
     padding:10px 14px; width:100%;
     border:1px solid var(--ink);
     border-radius:var(--radius-sm);
+    transition: background .15s ease, border-color .15s ease;
   }
   .btn-primary:hover{ background:#000; }
   .btn-primary:disabled{ background:#C9CBD6; border-color:#C9CBD6; cursor:not-allowed; }
@@ -241,15 +242,6 @@
   }
 
   .share-wrap{ position:relative; flex-shrink:0; }
-  .share-toast{
-    position:absolute; top:calc(100% + 8px); right:0;
-    background:var(--ink); color:#fff; font-size:12px; font-weight:600;
-    padding:8px 12px; border-radius:var(--radius-sm); white-space:nowrap;
-    box-shadow:var(--shadow-pop); z-index:41;
-    opacity:0; transform:translateY(-4px); pointer-events:none;
-    transition:opacity .15s ease, transform .15s ease;
-  }
-  .share-toast.show{ opacity:1; transform:translateY(0); }
 
   .download-wrap{ position:relative; flex-shrink:0; }
   .download-menu{
@@ -367,8 +359,6 @@
     display:flex; align-items:center; justify-content:center; padding:0;
   }
   .card-config-btn:hover{ border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
-  /* On KPI cards there's no sibling button to sit next to, so the gear
-     floats fixed to the corner instead of taking up flow space. */
   .stat-cell .card-config-btn{ position:absolute; top:14px; right:14px; }
 
   /* ---------- Chart grid ---------- */
@@ -449,7 +439,7 @@
 
   .hidden{ display:none !important; }
 
-  /* ---------- Modal ---------- */
+  /* ---------- Modals ---------- */
   .modal-overlay{ position:fixed; inset:0; background:rgba(24,26,42,0.5); display:flex; align-items:center; justify-content:center; z-index:50; padding:20px; }
   .modal-panel{ background:var(--panel); border-radius:var(--radius-lg); box-shadow:var(--shadow-pop); width:100%; max-width:420px; max-height:86vh; overflow:auto; }
   @media (max-width: 480px){
@@ -636,7 +626,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6l6.8-3.8M8.6 13.4l6.8 3.8"/></svg>
             Share
           </button>
-          <div class="share-toast" id="shareToast">Link copied!</div>
         </div>
         <div class="download-wrap">
           <button class="btn-outline" id="downloadBtn" type="button">
@@ -779,6 +768,25 @@
   </main>
 </div>
 
+<!-- ---------- Share Modal ---------- -->
+<div class="modal-overlay hidden" id="shareModalOverlay">
+  <div class="modal-panel" style="max-width:440px;">
+    <div class="modal-head">
+      <h3>Share Dashboard</h3>
+      <button class="modal-close" id="shareModalClose" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body" style="padding:20px;">
+      <p style="font-size:13px; color:var(--muted); margin:0 0 16px; line-height:1.5;">
+        Anyone with this link can open the dashboard tool. <b>Note:</b> Your current data remains securely in your browser. Recipients will see an empty dashboard until they load their own data.
+      </p>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="shareUrlInput" readonly style="flex:1; background:#fff; color:var(--ink); font-weight:500; cursor:text;">
+        <button class="btn-primary" id="shareModalCopyBtn" style="width:auto; padding:10px 20px;">Copy</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay hidden" id="modalOverlay">
   <div class="modal-panel">
     <div class="modal-head">
@@ -902,10 +910,6 @@ function initApp(){
   "use strict";
 
   // ---------- Share link ----------
-  // Replace this with the public URL where this HTML file is hosted
-  // (e.g. a GitHub Pages link like https://yourusername.github.io/your-repo/dashboard.html).
-  // Anyone who opens that link gets this same empty dashboard in their own browser,
-  // loads their own file/sheet, and nothing is shared back to you.
   const SHARE_URL = 'https://ankit123m.github.io/Dynamic-adaptive-dashboard/';
 
   // ---------- Metric definitions ----------
@@ -929,10 +933,10 @@ function initApp(){
     search: "",
     kpis: [],
     charts: {
-      bar: { xCol:null, yCols:[], metric:'sum', topN:10, sort:'desc' },
-      pie: { xCol:null, yCols:[], metric:'sum', topN:6 },
-      line: { xCol:null, yCols:[], metric:'raw' },
-      scatter: { xCol:null, yCol:null }
+      bar: { displayType:'column', xCol:null, yCols:[], metric:'sum', topN:10, sort:'desc' },
+      pie: { displayType:'donut', xCol:null, yCols:[], metric:'sum', topN:6 },
+      line: { displayType:'line', xCol:null, yCols:[], metric:'raw' },
+      scatter: { displayType:'scatter', xCol:null, yCol:null }
     },
     dateFilter: { active:false, column:null, start:null, end:null }
   };
@@ -960,9 +964,6 @@ function initApp(){
   function escapeAttr(str){ return escapeHtml(str); }
 
   function parseMessyNumber(v){
-    // Handles plain numbers as-is; for text, strips common noise
-    // (currency symbols, thousands separators, percent signs, stray
-    // spaces) and understands accounting-style negatives like "(123.45)".
     if(typeof v === 'number') return isNaN(v) ? null : v;
     if(v === null || v === undefined) return null;
     let s = String(v).trim();
@@ -981,16 +982,14 @@ function initApp(){
   function parseMessyDate(v){
     if(v === null || v === undefined || v === '') return null;
     if(v instanceof Date) return isNaN(v.getTime()) ? null : v;
-    if(typeof v === 'number') return null; // bare numbers are numeric data, not dates
+    if(typeof v === 'number') return null; 
     let s = String(v).trim();
     if(s === '') return null;
-    s = s.replace(/(\d+)(st|nd|rd|th)\b/gi, '$1'); // "5th Jan 2026" -> "5 Jan 2026"
+    s = s.replace(/(\d+)(st|nd|rd|th)\b/gi, '$1'); 
 
     let d = new Date(s);
     if(!isNaN(d.getTime())) return d;
 
-    // D/M/Y, D-M-Y, D.M.Y — try to resolve day-first vs month-first using
-    // whichever component can't possibly be a month (>12).
     let m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/.exec(s);
     if(m){
       let a = +m[1], b = +m[2], year = +m[3];
@@ -1001,7 +1000,6 @@ function initApp(){
       if(!isNaN(d.getTime()) && d.getMonth() === month - 1) return d;
     }
 
-    // Y/M/D or Y.M.D
     m = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/.exec(s);
     if(m){
       d = new Date(+m[1], +m[2] - 1, +m[3]);
@@ -1101,7 +1099,6 @@ function initApp(){
     return cols.length + ' columns';
   }
 
-  // ---------- Date-range filter helpers ----------
   function startOfDay(d){ const x = new Date(d); x.setHours(0,0,0,0); return x; }
   function endOfDay(d){ const x = new Date(d); x.setHours(23,59,59,999); return x; }
   function addDays(d, n){ const x = new Date(d); x.setDate(x.getDate() + n); return x; }
@@ -1149,7 +1146,6 @@ function initApp(){
     return { id:ds.id, name:ds.name, columns:ds.columns, types:ds.types, rows:getFilteredRows(ds) };
   }
 
-  // ---------- Downloads (charts as PNG, data as CSV/Excel) ----------
   function safeFileBase(){
     const ds = currentDataset();
     const name = ds ? ds.name : 'dashboard';
@@ -1292,9 +1288,6 @@ function initApp(){
     return entries;
   }
 
-  // Same as aggregateGroups but computes a value per X-category for EACH
-  // of several Y columns at once, so multi-series charts (grouped bars,
-  // multiple lines) can be built from one pass over the data.
   function aggregateGroupsMulti(rows, xCol, yCols, metric){
     const groups = new Map();
     const order = [];
@@ -1322,9 +1315,6 @@ function initApp(){
     return entries;
   }
 
-  // Totals for several columns across the WHOLE dataset (no grouping) —
-  // used when a distribution chart compares metrics against each other
-  // rather than categories.
   function totalsPerColumn(rows, yCols, metric){
     return yCols.map(col => {
       let value;
@@ -1340,7 +1330,6 @@ function initApp(){
     });
   }
 
-  // ---------- Parsers ----------
   function parseCSVText(text, name){
     const result = Papa.parse(text, { header:true, dynamicTyping:true, skipEmptyLines:true });
     const rows = result.data.filter(r => Object.values(r).some(v => v!==null && v!==''));
@@ -1355,12 +1344,6 @@ function initApp(){
   }
 
   function recalcSheetRange(ws){
-    // Some workbooks — especially .xlsx files re-saved or exported by
-    // third-party tools — leave the sheet's internal "!ref" range pointing
-    // at a smaller area than the data actually occupies. SheetJS trusts
-    // that range when reading rows, so it silently stops early (e.g.
-    // reading only 4 rows out of 20). Recomputing the range from the
-    // actual cell addresses present fixes this before we read anything.
     let maxRow = 0, maxCol = 0;
     Object.keys(ws).forEach(key => {
       if(key[0] === '!') return;
@@ -1375,10 +1358,6 @@ function initApp(){
   }
 
   function parseExcelArrayBuffer(buf, name){
-    // cellDates:true makes Excel hand back real JS Date objects for
-    // date-formatted cells (instead of its internal serial-number
-    // representation, e.g. 46112). Plain numeric cells are left as
-    // ordinary numbers untouched, so this only affects genuine dates.
     const wb = XLSX.read(buf, { type:'array', cellDates:true });
     const firstSheet = wb.SheetNames[0];
     const ws = wb.Sheets[firstSheet];
@@ -1430,13 +1409,6 @@ function initApp(){
     });
   }
 
-  // ---------- Google Sheet via JSONP (bypasses fetch/XHR restrictions) ----------
-  // A <script> tag load is governed by a different browser/CSP policy than
-  // fetch()/XHR. When an embedding page blocks outbound fetch calls
-  // entirely (which is what four failed fetch attempts across three
-  // different domains points to), this route can still get through,
-  // because it never uses fetch — it loads Google's own JSONP endpoint
-  // as a script, the same mechanism used for decades before CORS existed.
   let gvizCallbackCounter = 0;
 
   function loadGvizJsonp(id, gid, timeoutMs){
@@ -1479,14 +1451,6 @@ function initApp(){
   }
 
   function parseGvizDateString(v){
-    // Google's gviz JSON encodes date/datetime cells as the literal text
-    // "Date(Y,M,D[,H,Mi,S])" — note M is zero-indexed (0 = January). This
-    // decodes those numeric components directly into an unambiguous
-    // "YYYY-MM-DD" (or "YYYY-MM-DD HH:MM:SS") string. We deliberately do
-    // NOT use the sheet's locale-formatted display text (cell.f) for this,
-    // because a DD/MM/YYYY-locale sheet produces text like "13/07/2026"
-    // that JavaScript's Date parser reads incorrectly (or rejects), which
-    // silently turned date columns into plain text.
     const m = /^Date\((\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?\)$/.exec(v);
     if(!m) return null;
     const pad = (n) => String(n).padStart(2, '0');
@@ -1545,7 +1509,6 @@ function initApp(){
       });
   }
 
-  // ---------- Loading pipeline ----------
   function ingestDataset(ds){
     if(!ds.rows.length){
       setStatus('That source loaded but had no rows.', 'error');
@@ -1629,7 +1592,6 @@ function initApp(){
     }
   }
 
-  // ---------- Live auto-refresh (Google Sheet link only) ----------
   function setLiveStatus(msg, kind){
     const el = $('liveStatus');
     el.className = 'status-line' + (kind ? ' ' + kind : '');
@@ -1660,8 +1622,6 @@ function initApp(){
           setLiveStatus('Live — last check found no rows, keeping previous data', 'error');
           return;
         }
-        // Update the existing dataset object in place so KPI/chart
-        // configs (which reference column names) survive the refresh.
         ds.rows = fresh.rows;
         ds.columns = fresh.columns;
         ds.types = fresh.types;
@@ -1674,8 +1634,6 @@ function initApp(){
       });
   }
 
-
-  // ---------- Dataset switching ----------
   function renderDatasetList(){
     const section = $('datasetsSection');
     const list = $('datasetsList');
@@ -1709,10 +1667,10 @@ function initApp(){
         { metric:'max', columns:[yCol], threshold:null }
       ],
       charts: {
-        bar: { xCol:xCol, yCols:[yCol], metric:'sum', topN:10, sort:'desc' },
-        pie: { xCol:xCol, yCols:[yCol], metric:'sum', topN:6 },
-        line: { xCol:xCol, yCols:[yCol], metric:'raw' },
-        scatter: { xCol:yCol, yCol:y2Col }
+        bar: { displayType:'column', xCol:xCol, yCols:[yCol], metric:'sum', topN:10, sort:'desc' },
+        pie: { displayType:'donut', xCol:xCol, yCols:[yCol], metric:'sum', topN:6 },
+        line: { displayType:'line', xCol:xCol, yCols:[yCol], metric:'raw' },
+        scatter: { displayType:'scatter', xCol:yCol, yCol:y2Col }
       }
     };
   }
@@ -1733,8 +1691,6 @@ function initApp(){
     buildQuickDatePills(dateCols);
     $('filterBar').classList.toggle('hidden', dateCols.length === 0);
 
-    // Default the raw-data table to newest-first when a date column exists,
-    // since that's the most useful order to land on for time-series data.
     state.sort = dateCols.length ? { col:dateCols[0], dir:-1 } : { col:null, dir:1 };
 
     populateSidebarFields(ds, defaults);
@@ -1747,7 +1703,6 @@ function initApp(){
     $('sourceBadge').textContent = ds.name.toUpperCase();
   }
 
-  // ---------- Quick date-preset pills ----------
   const QUICK_PRESETS = [['last7','Last 7'], ['last14','Last 14'], ['last28','Last 28'], ['all','All time']];
 
   function buildQuickDatePills(dateCols){
@@ -1809,7 +1764,6 @@ function initApp(){
     }
   }
 
-  // ---------- Sidebar mapping ----------
   function populateSidebarFields(ds, defaults){
     $('mappingSection').classList.remove('hidden');
     const xSel = $('xField'), ySel = $('yField'), y2Sel = $('y2Field'), aggSel = $('aggField');
@@ -1829,11 +1783,10 @@ function initApp(){
     state.charts.bar = Object.assign({}, state.charts.bar, { xCol:xVal, yCols:[yVal], metric:aggVal });
     state.charts.pie = Object.assign({}, state.charts.pie, { xCol:xVal, yCols:[yVal], metric:aggVal });
     state.charts.line = Object.assign({}, state.charts.line, { xCol:xVal, yCols:[yVal], metric:aggVal });
-    state.charts.scatter = { xCol:yVal, yCol:y2Val };
+    state.charts.scatter = { displayType: state.charts.scatter.displayType, xCol:yVal, yCol:y2Val };
     renderAll();
   }
 
-  // ---------- Modal builders ----------
   function fieldWrap(labelText, el){
     const wrap = document.createElement('div');
     wrap.className = 'field';
@@ -2010,43 +1963,62 @@ function initApp(){
         const newMetric = $('kpiMetric').value;
         replaceField('kpiColumn', buildColumnChecklistField('kpiColumn', ds, readColumnChecklist('kpiColumn'), newMetric, true, 'Column(s)'));
       });
-    } else if(target.key === 'bar' || target.key === 'pie'){
-      const cfg = state.charts[target.key];
-      $('modalTitle').textContent = target.key === 'bar' ? 'Configure bar chart' : 'Configure distribution chart';
-      body.appendChild(buildSelectField('chartX', 'Category column (X-axis)', ds.columns, cfg.xCol));
-      body.appendChild(buildMetricField('chartMetric', METRICS, cfg.metric));
-      body.appendChild(buildColumnChecklistField('chartY', ds, cfg.yCols, cfg.metric, false, 'Value column(s)'));
-      body.appendChild(buildNumberField('chartTopN', 'Show top', cfg.topN, 1, 20));
-      if(target.key === 'bar'){
-        body.appendChild(buildSelectField('chartSort', 'Sort', [['desc','Highest first'],['asc','Lowest first']], cfg.sort));
+    } else if (target.type === 'chart') {
+      const key = target.key;
+      const cfg = state.charts[key];
+      $('modalTitle').textContent = 'Configure Chart';
+      
+      const chartTypes = [
+        ['column', 'Clustered Column Chart'],
+        ['bar', 'Clustered Bar Chart'],
+        ['stacked_column', 'Stacked Column Chart'],
+        ['stacked_bar', 'Stacked Bar Chart'],
+        ['line', 'Line Chart'],
+        ['area', 'Area Chart'],
+        ['pie', 'Pie Chart'],
+        ['donut', 'Donut Chart'],
+        ['scatter', 'Scatter Chart']
+      ];
+      
+      let defType = 'column';
+      if (key === 'pie') defType = 'donut';
+      if (key === 'line') defType = 'line';
+      if (key === 'scatter') defType = 'scatter';
+      
+      body.appendChild(buildSelectField('chartDisplayType', 'Chart Type', chartTypes, cfg.displayType || defType));
+
+      if (key === 'scatter') {
+        const numericCols = ds.columns.filter(c => ds.types[c] === 'numeric');
+        const cols = numericCols.length ? numericCols : ds.columns;
+        body.appendChild(buildSelectField('chartX', 'X numeric column', cols, cfg.xCol));
+        body.appendChild(buildSelectField('chartY', 'Y numeric column', cols, cfg.yCol));
+      } else {
+        body.appendChild(buildSelectField('chartX', 'Category column (X-axis)', ds.columns, cfg.xCol));
+        
+        if (key === 'line') {
+          body.appendChild(buildMetricField('chartMetric', LINE_METRICS, cfg.metric));
+          body.appendChild(buildColumnChecklistField('chartY', ds, cfg.yCols, cfg.metric === 'raw' ? 'sum' : cfg.metric, false, 'Value column(s)'));
+        } else {
+          body.appendChild(buildMetricField('chartMetric', METRICS, cfg.metric));
+          body.appendChild(buildColumnChecklistField('chartY', ds, cfg.yCols, cfg.metric, false, 'Value column(s)'));
+          body.appendChild(buildNumberField('chartTopN', 'Show top', cfg.topN, 1, 20));
+          if (key === 'bar') {
+            body.appendChild(buildSelectField('chartSort', 'Sort', [['desc','Highest first'],['asc','Lowest first']], cfg.sort));
+          }
+          if (key === 'pie') {
+            const note = document.createElement('p');
+            note.className = 'field-note';
+            note.textContent = 'Pick one column to see its share by category, or several to compare their totals against each other.';
+            body.appendChild(note);
+          }
+        }
+        
+        $('chartMetric').addEventListener('change', () => {
+          const newMetric = $('chartMetric').value;
+          const mappedMetric = (key === 'line' && newMetric === 'raw') ? 'sum' : newMetric;
+          replaceField('chartY', buildColumnChecklistField('chartY', ds, readColumnChecklist('chartY'), mappedMetric, false, 'Value column(s)'));
+        });
       }
-      if(target.key === 'pie'){
-        const note = document.createElement('p');
-        note.className = 'field-note';
-        note.textContent = 'Pick one column to see its share by category, or several to compare their totals against each other.';
-        body.appendChild(note);
-      }
-      $('chartMetric').addEventListener('change', () => {
-        const newMetric = $('chartMetric').value;
-        replaceField('chartY', buildColumnChecklistField('chartY', ds, readColumnChecklist('chartY'), newMetric, false, 'Value column(s)'));
-      });
-    } else if(target.key === 'line'){
-      const cfg = state.charts.line;
-      $('modalTitle').textContent = 'Configure trend chart';
-      body.appendChild(buildSelectField('chartX', 'Category / X-axis column', ds.columns, cfg.xCol));
-      body.appendChild(buildMetricField('chartMetric', LINE_METRICS, cfg.metric));
-      body.appendChild(buildColumnChecklistField('chartY', ds, cfg.yCols, cfg.metric === 'raw' ? 'sum' : cfg.metric, false, 'Value column(s)'));
-      $('chartMetric').addEventListener('change', () => {
-        const newMetric = $('chartMetric').value;
-        replaceField('chartY', buildColumnChecklistField('chartY', ds, readColumnChecklist('chartY'), newMetric === 'raw' ? 'sum' : newMetric, false, 'Value column(s)'));
-      });
-    } else if(target.key === 'scatter'){
-      const cfg = state.charts.scatter;
-      $('modalTitle').textContent = 'Configure scatter chart';
-      const numericCols = ds.columns.filter(c => ds.types[c] === 'numeric');
-      const cols = numericCols.length ? numericCols : ds.columns;
-      body.appendChild(buildSelectField('chartX', 'X numeric column', cols, cfg.xCol));
-      body.appendChild(buildSelectField('chartY', 'Y numeric column', cols, cfg.yCol));
     }
 
     $('modalOverlay').classList.remove('hidden');
@@ -2057,7 +2029,6 @@ function initApp(){
     modalTarget = null;
   }
 
-  // ---------- Date-range filter modal ----------
   function renderCalGrid(tableEl, year, month, rangeStart, rangeEnd){
     tableEl.innerHTML = '';
     const thead = document.createElement('thead');
@@ -2216,16 +2187,26 @@ function initApp(){
       };
     } else if(modalTarget.type === 'chart'){
       const key = modalTarget.key;
-      if(key === 'scatter'){
-        state.charts.scatter = { xCol: $('chartX').value, yCol: $('chartY').value };
-      } else if(key === 'line'){
+      if (key === 'scatter') {
+        state.charts.scatter = { 
+          displayType: $('chartDisplayType').value,
+          xCol: $('chartX').value, 
+          yCol: $('chartY').value 
+        };
+      } else if (key === 'line') {
         let yCols = readColumnChecklist('chartY');
         if(!yCols.length){ const ds = currentDataset(); yCols = ds.columns.slice(0,1); }
-        state.charts.line = { xCol: $('chartX').value, yCols: yCols, metric: $('chartMetric').value };
+        state.charts.line = { 
+          displayType: $('chartDisplayType').value,
+          xCol: $('chartX').value, 
+          yCols: yCols, 
+          metric: $('chartMetric').value 
+        };
       } else {
         let yCols = readColumnChecklist('chartY');
         if(!yCols.length){ const ds = currentDataset(); yCols = ds.columns.slice(0,1); }
         const cfg = {
+          displayType: $('chartDisplayType').value,
           xCol: $('chartX').value,
           yCols: yCols,
           metric: $('chartMetric').value,
@@ -2249,7 +2230,6 @@ function initApp(){
     renderAll();
   }
 
-  // ---------- Rendering: stats ----------
   const KPI_ICONS = {
     sum: '<path d="M12 5v14M5 12h14"/>',
     average: '<path d="M4 15l5-6 4 4 7-9"/><path d="M16 4h5v5"/>',
@@ -2294,7 +2274,6 @@ function initApp(){
     });
   }
 
-  // ---------- Rendering: charts ----------
   function destroyChart(key){
     if(charts[key]){ charts[key].destroy(); charts[key] = null; }
   }
@@ -2316,7 +2295,6 @@ function initApp(){
     const primaryCol = cfg.yCols[0];
     const isDateX = ds.types[cfg.xCol] === 'date';
     if(isDateX){
-      // Date categories: always newest-first, regardless of the value sort setting.
       entries.sort((a,b) => new Date(b.key) - new Date(a.key));
     } else {
       entries.sort((a,b) => {
@@ -2326,23 +2304,47 @@ function initApp(){
     }
     const top = entries.slice(0, cfg.topN || 10);
     $('barTitle').textContent = metricLabel(cfg.metric) + ' of ' + columnListLabel(cfg.yCols) + ' by ' + cfg.xCol;
+    
     destroyChart('bar');
-    const datasets = cfg.yCols.map((col, i) => ({
-      label: col,
-      data: top.map(e => e.values[col]),
-      backgroundColor: seriesColor(i, cfg.yCols.length),
-      borderRadius:2,
-      maxBarThickness: cfg.yCols.length > 1 ? 22 : 34
-    }));
+
+    const dType = cfg.displayType || 'column';
+    let cType = 'bar';
+    if(dType === 'line' || dType === 'area') cType = 'line';
+    if(dType === 'pie') cType = 'pie';
+    if(dType === 'donut') cType = 'doughnut';
+    if(dType === 'scatter') cType = 'scatter';
+
+    const isStacked = dType.includes('stacked');
+    const isHorizontal = (dType === 'bar' || dType === 'stacked_bar');
+
+    const datasets = cfg.yCols.map((col, i) => {
+      let bg = seriesColor(i, cfg.yCols.length);
+      if (cType === 'pie' || cType === 'doughnut') bg = CHART_COLORS.concat(['#A9A398']);
+      return {
+        label: col,
+        data: top.map(e => e.values[col]),
+        backgroundColor: bg,
+        borderColor: (cType === 'line') ? seriesColor(i, cfg.yCols.length) : (cType === 'pie' || cType === 'doughnut' ? '#FFFFFF' : undefined),
+        fill: dType === 'area',
+        borderRadius: (cType === 'bar') ? 2 : 0,
+        borderWidth: (cType === 'line' || cType === 'pie' || cType === 'doughnut') ? 2 : 0
+      };
+    });
+
     charts.bar = new Chart($('barChart'), {
-      type:'bar',
-      data:{ labels: top.map(e => e.key), datasets: datasets },
+      type: cType,
+      data: { labels: top.map(e => e.key), datasets: datasets },
       options: baseChartOptions({
-        plugins:{ legend:{ display: cfg.yCols.length > 1 }, tooltip:{ backgroundColor:'#191B1C' } },
-        scales:{
-          x:{ ticks:{ font:{ family:'Inter', size:10 }, autoSkip:true, maxRotation:45, minRotation:0 }, grid:{ display:false } },
-          y:{ ticks:{ font:{ family:'Inter', size:10 } }, grid:{ color:'#EDEAE1' } }
-        }
+        indexAxis: isHorizontal ? 'y' : 'x',
+        plugins: { 
+          legend: { display: cfg.yCols.length > 1 || cType === 'pie' || cType === 'doughnut' }, 
+          tooltip: { backgroundColor:'#191B1C' } 
+        },
+        scales: (cType === 'pie' || cType === 'doughnut' || cType === 'scatter') ? {} : {
+          x: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 }, autoSkip:true, maxRotation:45 }, grid: { display:false } },
+          y: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 } }, grid: { color:'#EDEAE1' } }
+        },
+        cutout: dType === 'donut' ? '58%' : undefined
       })
     });
   }
@@ -2373,10 +2375,41 @@ function initApp(){
     }
     $('pieTitle').textContent = metricLabel(cfg.metric) + ' of ' + columnListLabel(cfg.yCols) + titleSuffix;
     destroyChart('pie');
+
+    const dType = cfg.displayType || 'donut';
+    let cType = 'pie';
+    if (dType === 'column' || dType === 'stacked_column') cType = 'bar';
+    if (dType === 'bar' || dType === 'stacked_bar') cType = 'bar';
+    if (dType === 'line' || dType === 'area') cType = 'line';
+    if (dType === 'donut') cType = 'doughnut';
+    if (dType === 'scatter') cType = 'scatter';
+
+    const isStacked = dType.includes('stacked');
+    const isHorizontal = (dType === 'bar' || dType === 'stacked_bar');
+
     charts.pie = new Chart($('pieChart'), {
-      type:'doughnut',
-      data:{ labels:labels, datasets:[{ data:data, backgroundColor: CHART_COLORS.concat(['#A9A398']), borderWidth:2, borderColor:'#FFFFFF' }] },
-      options: baseChartOptions({ cutout:'58%' })
+      type: cType,
+      data: {
+        labels: labels,
+        datasets: [{
+          label: cfg.yCols.length > 1 ? 'Totals' : cfg.yCols[0],
+          data: data,
+          backgroundColor: (cType === 'pie' || cType === 'doughnut') ? CHART_COLORS.concat(['#A9A398']) : CHART_COLORS[4],
+          borderColor: (cType === 'line') ? CHART_COLORS[4] : '#FFFFFF',
+          fill: dType === 'area',
+          borderRadius: (cType === 'bar') ? 2 : 0,
+          borderWidth: (cType === 'line' || cType === 'pie' || cType === 'doughnut') ? 2 : 0
+        }]
+      },
+      options: baseChartOptions({
+        indexAxis: isHorizontal ? 'y' : 'x',
+        cutout: dType === 'donut' ? '58%' : undefined,
+        plugins: { legend: { display: cType === 'pie' || cType === 'doughnut' } },
+        scales: (cType === 'pie' || cType === 'doughnut' || cType === 'scatter') ? {} : {
+          x: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 } }, grid: { display:false } },
+          y: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 } }, grid: { color:'#EDEAE1' } }
+        }
+      })
     });
   }
 
@@ -2409,24 +2442,45 @@ function initApp(){
       ? columnListLabel(cfg.yCols) + ' across ' + cfg.xCol
       : metricLabel(cfg.metric) + ' of ' + columnListLabel(cfg.yCols) + ' by ' + cfg.xCol;
     destroyChart('line');
-    const datasets = cfg.yCols.map((col, i) => ({
-      label: col,
-      data: seriesData[i],
-      borderColor: seriesColor(i, cfg.yCols.length),
-      backgroundColor: cfg.yCols.length === 1 ? 'rgba(99,102,241,0.12)' : 'transparent',
-      fill: cfg.yCols.length === 1,
-      tension:0.25,
-      pointRadius: labels.length > 25 ? 0 : 3,
-      borderWidth:2
-    }));
+
+    const dType = cfg.displayType || 'line';
+    let cType = 'line';
+    if (dType === 'column' || dType === 'stacked_column') cType = 'bar';
+    if (dType === 'bar' || dType === 'stacked_bar') cType = 'bar';
+    if (dType === 'pie') cType = 'pie';
+    if (dType === 'donut') cType = 'doughnut';
+    if (dType === 'scatter') cType = 'scatter';
+
+    const isStacked = dType.includes('stacked');
+    const isHorizontal = (dType === 'bar' || dType === 'stacked_bar');
+
+    const datasets = cfg.yCols.map((col, i) => {
+      let bg = seriesColor(i, cfg.yCols.length);
+      if (cType === 'pie' || cType === 'doughnut') bg = CHART_COLORS.concat(['#A9A398']);
+      
+      return {
+        label: col,
+        data: seriesData[i],
+        backgroundColor: (cType === 'line' && dType !== 'area') ? 'rgba(99,102,241,0.12)' : bg,
+        borderColor: (cType === 'line') ? seriesColor(i, cfg.yCols.length) : (cType === 'pie' || cType === 'doughnut' ? '#FFFFFF' : undefined),
+        fill: dType === 'area',
+        borderRadius: (cType === 'bar') ? 2 : 0,
+        tension: 0.25,
+        borderWidth: (cType === 'line' || cType === 'pie' || cType === 'doughnut') ? 2 : 0,
+        pointRadius: labels.length > 25 ? 0 : 3
+      };
+    });
+
     charts.line = new Chart($('lineChart'), {
-      type:'line',
-      data:{ labels:labels, datasets:datasets },
+      type: cType,
+      data: { labels: labels, datasets: datasets },
       options: baseChartOptions({
-        plugins:{ legend:{ display: cfg.yCols.length > 1 } },
-        scales:{
-          x:{ ticks:{ font:{ family:'Inter', size:10 }, autoSkip:true, maxRotation:45 }, grid:{ display:false } },
-          y:{ ticks:{ font:{ family:'Inter', size:10 } }, grid:{ color:'#EDEAE1' } }
+        indexAxis: isHorizontal ? 'y' : 'x',
+        cutout: dType === 'donut' ? '58%' : undefined,
+        plugins: { legend: { display: cfg.yCols.length > 1 || cType === 'pie' || cType === 'doughnut' } },
+        scales: (cType === 'pie' || cType === 'doughnut' || cType === 'scatter') ? {} : {
+          x: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 }, autoSkip:true, maxRotation:45 }, grid: { display:false } },
+          y: { stacked: isStacked, ticks: { font:{ family:'Inter', size:10 } }, grid: { color:'#EDEAE1' } }
         }
       })
     });
@@ -2444,14 +2498,60 @@ function initApp(){
       canvasEl.classList.remove('hidden');
       $('scatterTitle').textContent = cfg.xCol + ' vs ' + cfg.yCol;
       destroyChart('scatter');
+
+      const dType = cfg.displayType || 'scatter';
+      let cType = 'scatter';
+      if (dType === 'column' || dType === 'stacked_column') cType = 'bar';
+      if (dType === 'bar' || dType === 'stacked_bar') cType = 'bar';
+      if (dType === 'line' || dType === 'area') cType = 'line';
+      if (dType === 'pie') cType = 'pie';
+      if (dType === 'donut') cType = 'doughnut';
+
+      const isStacked = dType.includes('stacked');
+      const isHorizontal = (dType === 'bar' || dType === 'stacked_bar');
+
+      let dataPayload, labels;
+      if (cType === 'scatter' || cType === 'line') {
+          dataPayload = points;
+          labels = undefined;
+      } else {
+          labels = points.map(p => String(p.x));
+          dataPayload = points.map(p => p.y);
+      }
+
+      let bg = CHART_COLORS[3];
+      if (cType === 'pie' || cType === 'doughnut') bg = CHART_COLORS.concat(['#A9A398']);
+
       charts.scatter = new Chart(canvasEl, {
-        type:'scatter',
-        data:{ datasets:[{ label: cfg.xCol + ' vs ' + cfg.yCol, data: points, backgroundColor: CHART_COLORS[3] }] },
+        type: cType,
+        data: {
+          labels: labels,
+          datasets: [{
+            label: cfg.xCol + ' vs ' + cfg.yCol,
+            data: dataPayload,
+            backgroundColor: bg,
+            borderColor: cType === 'line' ? CHART_COLORS[3] : (cType === 'pie' || cType === 'doughnut' ? '#FFFFFF' : undefined),
+            fill: dType === 'area',
+            borderRadius: (cType === 'bar') ? 2 : 0,
+            borderWidth: (cType === 'line' || cType === 'pie' || cType === 'doughnut') ? 2 : 0
+          }]
+        },
         options: baseChartOptions({
-          plugins:{ legend:{ display:false } },
-          scales:{
-            x:{ title:{ display:true, text:cfg.xCol, font:{family:'Inter', size:11} }, ticks:{ font:{ family:'Inter', size:10 } }, grid:{ color:'#EDEAE1' } },
-            y:{ title:{ display:true, text:cfg.yCol, font:{family:'Inter', size:11} }, ticks:{ font:{ family:'Inter', size:10 } }, grid:{ color:'#EDEAE1' } }
+          indexAxis: isHorizontal ? 'y' : 'x',
+          cutout: dType === 'donut' ? '58%' : undefined,
+          plugins: { legend: { display: cType === 'pie' || cType === 'doughnut' } },
+          scales: (cType === 'pie' || cType === 'doughnut') ? {} : {
+            x: { 
+              stacked: isStacked,
+              type: (cType === 'scatter' || cType === 'line') && !labels ? 'linear' : 'category',
+              title: { display:true, text:cfg.xCol, font:{family:'Inter', size:11} },
+              ticks: { font:{ family:'Inter', size:10 } }
+            },
+            y: { 
+              stacked: isStacked,
+              title: { display:true, text:cfg.yCol, font:{family:'Inter', size:11} },
+              ticks: { font:{ family:'Inter', size:10 } }
+            }
           }
         })
       });
@@ -2470,12 +2570,15 @@ function initApp(){
     renderScatter(ds);
   }
 
-  // ---------- "Open full sheet" ----------
-  // Rebuilds a chart's data WITHOUT the dashboard's Top-N / point caps, so
-  // the standalone page shows every category or row behind it, then opens
-  // that as a self-contained HTML page in a new tab.
   function buildFullChartPayload(key, ds){
     const cfg = state.charts[key];
+    const dType = cfg.displayType || (key === 'pie' ? 'donut' : key === 'bar' ? 'column' : key);
+    let cType = 'bar';
+    if (dType === 'line' || dType === 'area') cType = 'line';
+    if (dType === 'pie') cType = 'pie';
+    if (dType === 'donut') cType = 'doughnut';
+    if (dType === 'scatter') cType = 'scatter';
+
     if(key === 'bar'){
       if(!cfg.xCol || !cfg.yCols.length) return null;
       const entries = aggregateGroupsMulti(ds.rows, cfg.xCol, cfg.yCols, cfg.metric);
@@ -2486,11 +2589,12 @@ function initApp(){
         return cfg.sort === 'asc' ? av - bv : bv - av;
       });
       return {
-        chartType:'bar',
+        chartType: cType,
+        displayType: dType,
         title: $('barTitle').textContent,
         subtitle: entries.length.toLocaleString() + ' categories · grouped by ' + cfg.xCol,
         labels: entries.map(e => e.key),
-        datasets: cfg.yCols.map((col,i) => ({ label:col, data: entries.map(e => e.values[col]), backgroundColor: seriesColor(i, cfg.yCols.length), borderRadius:2 })),
+        datasets: cfg.yCols.map((col,i) => ({ label:col, data: entries.map(e => e.values[col]), backgroundColor: (cType==='pie'||cType==='doughnut')?CHART_COLORS.concat(['#A9A398']):seriesColor(i, cfg.yCols.length), fill: dType === 'area', borderRadius:(cType==='bar')?2:0, borderWidth:(cType==='line'||cType==='pie'||cType==='doughnut')?2:0 })),
         columns: [cfg.xCol].concat(cfg.yCols),
         rows: entries.map(e => { const r = {}; r[cfg.xCol] = e.key; cfg.yCols.forEach(c => r[c] = e.values[c]); return r; })
       };
@@ -2515,11 +2619,12 @@ function initApp(){
         rows = totals.map(e => ({ Column:e[0], Value:e[1] }));
       }
       return {
-        chartType:'doughnut',
+        chartType: cType,
+        displayType: dType,
         title: $('pieTitle').textContent,
         subtitle: labels.length.toLocaleString() + ' segments',
         labels: labels,
-        datasets: [{ data:data, backgroundColor: CHART_COLORS.concat(['#A9A398']), borderWidth:2, borderColor:'#FFFFFF' }],
+        datasets: [{ label: cfg.yCols.length > 1 ? 'Totals' : cfg.yCols[0], data:data, backgroundColor: (cType==='pie'||cType==='doughnut')?CHART_COLORS.concat(['#A9A398']):CHART_COLORS[4], fill: dType === 'area', borderRadius:(cType==='bar')?2:0, borderWidth:(cType==='line'||cType==='pie'||cType==='doughnut')?2:0 }],
         columns: columns,
         rows: rows
       };
@@ -2546,11 +2651,12 @@ function initApp(){
         rows = ordered.map(e => { const o = {}; o[cfg.xCol] = e.key; cfg.yCols.forEach(c => o[c] = e.values[c]); return o; });
       }
       return {
-        chartType:'line',
+        chartType: cType,
+        displayType: dType,
         title: $('lineTitle').textContent,
         subtitle: rows.length.toLocaleString() + ' points',
         labels: labels,
-        datasets: cfg.yCols.map((col,i) => ({ label:col, data: seriesData[i], borderColor: seriesColor(i, cfg.yCols.length), backgroundColor: cfg.yCols.length === 1 ? 'rgba(99,102,241,0.12)' : 'transparent', fill: cfg.yCols.length === 1, tension:0.25, pointRadius: labels.length > 60 ? 0 : 2, borderWidth:2 })),
+        datasets: cfg.yCols.map((col,i) => ({ label:col, data: seriesData[i], borderColor: (cType==='line')?seriesColor(i, cfg.yCols.length):undefined, backgroundColor: (cType==='pie'||cType==='doughnut')?CHART_COLORS.concat(['#A9A398']):(cType === 'line' && dType !== 'area') ? 'rgba(99,102,241,0.12)' : seriesColor(i, cfg.yCols.length), fill: dType === 'area', borderRadius:(cType==='bar')?2:0, tension:0.25, pointRadius: labels.length > 60 ? 0 : 2, borderWidth:(cType==='line'||cType==='pie'||cType==='doughnut')?2:0 })),
         columns: columns,
         rows: rows
       };
@@ -2559,12 +2665,23 @@ function initApp(){
       if(!cfg.xCol || !cfg.yCol) return null;
       const points = ds.rows.map(r => ({ x: toNumber(r[cfg.xCol]), y: toNumber(r[cfg.yCol]) })).filter(p => !isNaN(p.x) && !isNaN(p.y));
       if(!points.length) return null;
+
+      let dataPayload, labels;
+      if (cType === 'scatter' || cType === 'line') {
+          dataPayload = points;
+          labels = undefined;
+      } else {
+          labels = points.map(p => String(p.x));
+          dataPayload = points.map(p => p.y);
+      }
+
       return {
-        chartType:'scatter',
+        chartType: cType,
+        displayType: dType,
         title: $('scatterTitle').textContent,
         subtitle: points.length.toLocaleString() + ' points',
-        labels: [],
-        datasets: [{ label: cfg.xCol + ' vs ' + cfg.yCol, data: points, backgroundColor: CHART_COLORS[3] }],
+        labels: labels,
+        datasets: [{ label: cfg.xCol + ' vs ' + cfg.yCol, data: dataPayload, backgroundColor: (cType==='pie'||cType==='doughnut')?CHART_COLORS.concat(['#A9A398']):CHART_COLORS[3], fill: dType === 'area', borderRadius:(cType==='bar')?2:0, borderWidth:(cType==='line'||cType==='pie'||cType==='doughnut')?2:0 }],
         columns: [cfg.xCol, cfg.yCol],
         rows: points.map(p => ({ [cfg.xCol]: p.x, [cfg.yCol]: p.y })),
         axisX: cfg.xCol,
@@ -2601,10 +2718,6 @@ function initApp(){
     if(sheetChart){ sheetChart.destroy(); sheetChart = null; }
   }
 
-  // Quick stats strip for the full-sheet overlay: overview (row/column
-  // counts) plus, per column, sum/average/min/max for numeric columns or
-  // unique-count/most-common for category columns — computed from the
-  // complete data behind the chart (not affected by the search box).
   function renderSheetSummary(){
     const cols = sheetState.columns, rows = sheetState.rows;
     const overview = '<div class="sheet-summary-cell sheet-summary-overview"><div class="label">Overview</div><div class="stats">' +
@@ -2647,37 +2760,35 @@ function initApp(){
     if(sheetChart){ sheetChart.destroy(); sheetChart = null; }
     const ctx = $('sheetChart');
     const opts = baseChartOptions({});
-    if(payload.chartType === 'doughnut'){
-      sheetChart = new Chart(ctx, {
-        type:'doughnut',
-        data:{ labels: payload.labels, datasets: payload.datasets },
-        options: Object.assign({}, opts, { cutout:'58%' })
-      });
-    } else if(payload.chartType === 'scatter'){
-      sheetChart = new Chart(ctx, {
-        type:'scatter',
-        data:{ datasets: payload.datasets },
-        options: Object.assign({}, opts, {
-          plugins: Object.assign({}, opts.plugins, { legend:{ display:false } }),
-          scales:{
-            x:{ title:{ display:true, text:payload.axisX, font:{family:'Inter', size:11} }, ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } },
-            y:{ title:{ display:true, text:payload.axisY, font:{family:'Inter', size:11} }, ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } }
+
+    const dType = payload.displayType || 'column';
+    const isStacked = dType.includes('stacked');
+    const isHorizontal = (dType === 'bar' || dType === 'stacked_bar');
+
+    sheetChart = new Chart(ctx, {
+      type: payload.chartType,
+      data: { labels: payload.labels, datasets: payload.datasets },
+      options: Object.assign({}, opts, {
+        indexAxis: isHorizontal ? 'y' : 'x',
+        cutout: dType === 'donut' ? '58%' : undefined,
+        plugins: Object.assign({}, opts.plugins, { legend: { display: payload.chartType === 'pie' || payload.chartType === 'doughnut' || payload.datasets.length > 1 } }),
+        scales: (payload.chartType === 'pie' || payload.chartType === 'doughnut') ? {} : {
+          x: { 
+            stacked: isStacked, 
+            type: (payload.chartType === 'scatter' || payload.chartType === 'line') && !payload.labels ? 'linear' : 'category',
+            title: payload.axisX ? { display:true, text:payload.axisX, font:{family:'Inter', size:11} } : undefined,
+            ticks: { font:{family:'Inter', size:10}, autoSkip:true, maxRotation:45 }, 
+            grid: { display:false } 
+          },
+          y: { 
+            stacked: isStacked, 
+            title: payload.axisY ? { display:true, text:payload.axisY, font:{family:'Inter', size:11} } : undefined,
+            ticks: { font:{family:'Inter', size:10} }, 
+            grid: { color:'#EDEAE1' } 
           }
-        })
-      });
-    } else {
-      sheetChart = new Chart(ctx, {
-        type: payload.chartType,
-        data:{ labels: payload.labels, datasets: payload.datasets },
-        options: Object.assign({}, opts, {
-          plugins: Object.assign({}, opts.plugins, { legend:{ display: payload.datasets.length > 1 } }),
-          scales:{
-            x:{ ticks:{ font:{family:'Inter', size:10}, autoSkip:true, maxRotation:45 }, grid:{ display:false } },
-            y:{ ticks:{ font:{family:'Inter', size:10} }, grid:{ color:'#EDEAE1' } }
-          }
-        })
-      });
-    }
+        }
+      })
+    });
   }
 
   function renderSheetTable(){
@@ -2729,7 +2840,6 @@ function initApp(){
   }
 
 
-  // ---------- Rendering: table ----------
   function renderTable(ds){
     const headRow = $('tableHeadRow');
     headRow.innerHTML = ds.columns.map(c => {
@@ -2759,7 +2869,7 @@ function initApp(){
           const ad = new Date(av), bd = new Date(bv);
           const aValid = !isNaN(ad), bValid = !isNaN(bd);
           if(aValid && bValid) return (ad.getTime() - bd.getTime()) * dir;
-          if(aValid !== bValid) return aValid ? -1 : 1; // valid dates before blanks either way
+          if(aValid !== bValid) return aValid ? -1 : 1; 
         }
         const an = toNumber(av), bn = toNumber(bv);
         if(!isNaN(an) && !isNaN(bn)) return (an-bn) * dir;
@@ -2797,7 +2907,6 @@ function initApp(){
     }
   }
 
-  // ---------- Wire up events ----------
   const dropzone = $('dropzone');
   const fileInput = $('fileInput');
   dropzone.addEventListener('click', () => fileInput.click());
@@ -2849,8 +2958,6 @@ function initApp(){
   $('lineConfigBtn').addEventListener('click', (e) => { e.stopPropagation(); openModal({ type:'chart', key:'line' }); });
   $('scatterConfigBtn').addEventListener('click', (e) => { e.stopPropagation(); openModal({ type:'chart', key:'scatter' }); });
 
-  // ---------- "Open full sheet" — click a chart (or its expand button) to
-  // open a standalone page with the enlarged chart plus its complete data. ----------
   $('barExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('bar'); });
   $('pieExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('pie'); });
   $('lineExpandBtn').addEventListener('click', (e) => { e.stopPropagation(); openChartSheet('line'); });
@@ -2870,10 +2977,9 @@ function initApp(){
   $('modalReset').addEventListener('click', resetModalTarget);
   $('modalOverlay').addEventListener('click', (e) => { if(e.target.id === 'modalOverlay') closeModal(); });
   document.addEventListener('keydown', (e) => {
-    if(e.key === 'Escape'){ closeModal(); closeDateModal(); closeChartSheet(); }
+    if(e.key === 'Escape'){ closeModal(); closeDateModal(); closeChartSheet(); $('shareModalOverlay').classList.add('hidden'); }
   });
 
-  // ---------- Date-range filter wiring ----------
   $('dateModalClose').addEventListener('click', closeDateModal);
   $('dateModalCancel').addEventListener('click', closeDateModal);
   $('dateModalOverlay').addEventListener('click', (e) => { if(e.target.id === 'dateModalOverlay') closeDateModal(); });
@@ -2898,33 +3004,42 @@ function initApp(){
     renderAll();
   });
 
-  // ---------- Share button wiring ----------
+  // ---------- Share modal wiring ----------
   $('shareBtn').addEventListener('click', () => {
-    const showToast = () => {
-      const toast = $('shareToast');
-      toast.classList.add('show');
-      clearTimeout(showToast._t);
-      showToast._t = setTimeout(() => toast.classList.remove('show'), 2200);
+    $('shareUrlInput').value = SHARE_URL;
+    const btn = $('shareModalCopyBtn');
+    btn.textContent = 'Copy';
+    btn.style.backgroundColor = '';
+    btn.style.borderColor = '';
+    $('shareModalOverlay').classList.remove('hidden');
+  });
+
+  $('shareModalClose').addEventListener('click', () => $('shareModalOverlay').classList.add('hidden'));
+  $('shareModalOverlay').addEventListener('click', (e) => { if(e.target.id === 'shareModalOverlay') $('shareModalOverlay').classList.add('hidden'); });
+
+  $('shareModalCopyBtn').addEventListener('click', () => {
+    const input = $('shareUrlInput');
+    input.select();
+    input.setSelectionRange(0, 99999);
+    
+    const markCopied = () => {
+      const btn = $('shareModalCopyBtn');
+      btn.textContent = 'Copied!';
+      btn.style.backgroundColor = 'var(--accent-green)';
+      btn.style.borderColor = 'var(--accent-green)';
     };
+
     const fallbackCopy = () => {
-      const ta = document.createElement('textarea');
-      ta.value = SHARE_URL;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch(err) { /* ignore */ }
-      document.body.removeChild(ta);
-      showToast();
+      try { document.execCommand('copy'); markCopied(); } catch(err) { }
     };
+    
     if(navigator.clipboard && window.isSecureContext){
-      navigator.clipboard.writeText(SHARE_URL).then(showToast, fallbackCopy);
+      navigator.clipboard.writeText(SHARE_URL).then(markCopied, fallbackCopy);
     } else {
       fallbackCopy();
     }
   });
 
-  // ---------- Download menu wiring ----------
   $('downloadBtn').addEventListener('click', (e) => {
     e.stopPropagation();
     $('downloadMenu').classList.toggle('hidden');
@@ -2940,7 +3055,6 @@ function initApp(){
   $('downloadCsvBtn').addEventListener('click', () => { downloadCsv(); $('downloadMenu').classList.add('hidden'); });
   $('downloadXlsxBtn').addEventListener('click', () => { downloadXlsx(); $('downloadMenu').classList.add('hidden'); });
 
-  // ---------- Seed with sample data ----------
   function seedSampleData(){
     const regions = ['North','South','East','West','Central'];
     const products = ['Alpha','Beta','Gamma','Delta'];
